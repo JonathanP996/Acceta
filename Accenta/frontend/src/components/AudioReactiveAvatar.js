@@ -154,19 +154,34 @@ const AudioReactiveAvatar = ({ audioBlob, isSpeaking, onAnimationComplete }) => 
 
     // Draw idle state if no audio (include wink progress)
     if (!audioBlob) {
-      draw(ctx, canvas.width, canvas.height, 0.2, null, winkProgress);
+      // Initial draw
+      draw(ctx, canvas.width, canvas.height, 0.2, null, winkProgressRef.current);
       
       // Keep animating the idle state (for wink animation)
       // Use ref to read latest winkProgress value in animation loop
+      let isIdleActive = true;
       const idleAnimation = () => {
-        if (!audioBlob && canvasRef.current) {
-          // Read latest winkProgress from ref (updated by wink animation)
-          draw(ctx, canvas.width, canvas.height, 0.2, null, winkProgressRef.current);
-          idleAnimationRef.current = requestAnimationFrame(idleAnimation);
+        // Check if we should continue (no audio blob and canvas still exists)
+        if (isIdleActive && canvasRef.current) {
+          // Check audioBlob from closure - if it changed, stop this loop
+          // The main effect will restart with audio if needed
+          const currentAudioBlob = audioBlob; // Capture from closure
+          if (!currentAudioBlob) {
+            // Read latest winkProgress from ref (updated by wink animation)
+            draw(ctx, canvas.width, canvas.height, 0.2, null, winkProgressRef.current);
+            idleAnimationRef.current = requestAnimationFrame(idleAnimation);
+          }
         }
       };
       idleAnimationRef.current = requestAnimationFrame(idleAnimation);
-      return;
+      
+      return () => {
+        isIdleActive = false;
+        if (idleAnimationRef.current) {
+          cancelAnimationFrame(idleAnimationRef.current);
+          idleAnimationRef.current = null;
+        }
+      };
     }
 
     // Initialize audio context and analyser
@@ -199,8 +214,21 @@ const AudioReactiveAvatar = ({ audioBlob, isSpeaking, onAnimationComplete }) => 
         setIsPlaying(true);
 
         // Animation loop
+        let isAnimating = true;
+        
+        // Stop animation function
+        const stopAnimation = () => {
+          isAnimating = false;
+          if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+            animationFrameRef.current = null;
+          }
+        };
+        
         const animate = () => {
-          if (!isPlaying) return;
+          if (!isAnimating || !isPlaying || !canvasRef.current) {
+            return;
+          }
 
           analyser.getByteFrequencyData(dataArray);
           
@@ -214,8 +242,8 @@ const AudioReactiveAvatar = ({ audioBlob, isSpeaking, onAnimationComplete }) => 
           
           setAudioLevel(normalizedLevel);
 
-          // Draw animation with frequency data (include wink progress)
-          draw(ctx, canvas.width, canvas.height, normalizedLevel, dataArray, winkProgress);
+          // Draw animation with frequency data (include wink progress from ref)
+          draw(ctx, canvas.width, canvas.height, normalizedLevel, dataArray, winkProgressRef.current);
 
           animationFrameRef.current = requestAnimationFrame(animate);
         };
@@ -224,15 +252,12 @@ const AudioReactiveAvatar = ({ audioBlob, isSpeaking, onAnimationComplete }) => 
 
         source.onended = () => {
           setIsPlaying(false);
+          stopAnimation();
           if (onAnimationComplete) {
             onAnimationComplete();
           }
-          // Cleanup
-          if (animationFrameRef.current) {
-            cancelAnimationFrame(animationFrameRef.current);
-          }
           // Draw final state (include wink progress)
-          draw(ctx, canvas.width, canvas.height, 0, null, winkProgress);
+          draw(ctx, canvas.width, canvas.height, 0, null, winkProgressRef.current);
         };
 
         source.start(0);
@@ -250,15 +275,28 @@ const AudioReactiveAvatar = ({ audioBlob, isSpeaking, onAnimationComplete }) => 
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
       if (idleAnimationRef.current) {
         cancelAnimationFrame(idleAnimationRef.current);
+        idleAnimationRef.current = null;
       }
       if (audioContextRef.current) {
         audioContextRef.current.close();
+        audioContextRef.current = null;
       }
     };
-  }, [audioBlob, onAnimationComplete, winkProgress]);
+  }, [audioBlob, onAnimationComplete]);
+  
+  // Separate effect to update canvas when winkProgress changes (for idle state)
+  useEffect(() => {
+    if (!canvasRef.current || audioBlob) return; // Only update if in idle state
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    // Redraw with updated wink progress
+    draw(ctx, canvas.width, canvas.height, 0.2, null, winkProgressRef.current);
+  }, [winkProgress, audioBlob]);
 
   return (
     <div className="flex flex-col items-center justify-center">
