@@ -22,6 +22,28 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Response interceptor for debugging blob responses
+api.interceptors.response.use(
+  (response) => {
+    // Log blob responses for debugging
+    if (response.config.responseType === 'blob') {
+      console.log('📦 Blob response interceptor:', {
+        url: response.config.url,
+        status: response.status,
+        dataType: typeof response.data,
+        isBlob: response.data instanceof Blob,
+        size: response.data?.size,
+        type: response.data?.type
+      });
+    }
+    return response;
+  },
+  (error) => {
+    console.error('❌ Axios error:', error);
+    return Promise.reject(error);
+  }
+);
+
 // Auth services
 export const authService = {
   signup: async (email, username, password) => {
@@ -111,12 +133,75 @@ export const analysisService = {
 // TTS services
 export const ttsService = {
   generateSpeech: async (text, voiceId = null, accent = null, robotic = false) => {
-    const response = await api.post(
-      `${API_BASE_URL}/api/tts/generate`,
-      { text, voice_id: voiceId, accent, robotic },
-      { responseType: 'blob' } // Important: get audio as blob
-    );
-    return response.data;
+    try {
+      console.log('🎤 TTS Request:', { text: text.substring(0, 50), voiceId, accent, robotic });
+      console.log('🎤 TTS Endpoint:', `${API_BASE_URL}/api/tts/generate`);
+      
+      const response = await api.post(
+        `${API_BASE_URL}/api/tts/generate`,
+        { text, voice_id: voiceId, accent, robotic },
+        { 
+          responseType: 'blob', // Important: get audio as blob
+          timeout: 30000 // 30 second timeout
+        }
+      );
+      
+      console.log('🎤 TTS Response received:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        dataType: typeof response.data,
+        dataSize: response.data?.size || 'unknown',
+        dataConstructor: response.data?.constructor?.name || 'unknown'
+      });
+      
+      // Validate response
+      if (!response.data) {
+        throw new Error('No data in TTS response');
+      }
+      
+      // Check if it's already a Blob
+      if (response.data instanceof Blob) {
+        console.log('✅ TTS Response is already a Blob:', {
+          size: response.data.size,
+          type: response.data.type
+        });
+        return response.data;
+      }
+      
+      // If it's not a Blob, try to convert it
+      console.warn('⚠️ TTS Response is not a Blob, attempting conversion');
+      if (typeof response.data === 'string') {
+        // Might be base64 encoded
+        const audioBytes = Uint8Array.from(atob(response.data), c => c.charCodeAt(0));
+        const blob = new Blob([audioBytes], { type: 'audio/mpeg' });
+        console.log('✅ Converted string to Blob:', { size: blob.size, type: blob.type });
+        return blob;
+      }
+      
+      // Try to create blob from whatever we got
+      const blob = new Blob([response.data], { type: 'audio/mpeg' });
+      console.log('✅ Created Blob from response data:', { size: blob.size, type: blob.type });
+      return blob;
+      
+    } catch (error) {
+      console.error('❌ TTS Service Error:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        headers: error.response?.headers
+      });
+      
+      // If it's a network error, provide helpful message
+      if (!error.response) {
+        throw new Error(`Network error: Could not connect to TTS service at ${API_BASE_URL}. Make sure the backend is running.`);
+      }
+      
+      // If it's an HTTP error, include status info
+      throw new Error(`TTS generation failed: ${error.response?.status} ${error.response?.statusText || error.message}`);
+    }
   },
 };
 

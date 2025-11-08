@@ -100,6 +100,7 @@ async def analyze_accent(
             try:
                 # Use asyncio timeout wrapper to ensure we don't block
                 import asyncio
+                from services.accent_classifier import classify_accent, _heuristic_accent_classification
                 accent_classification = await asyncio.wait_for(
                     classify_accent(
                         tmp_file_path,
@@ -211,9 +212,12 @@ async def analyze_accent(
             
             # Step 8: Save session data (async, don't wait)
             try:
+                from datetime import datetime
                 session_data = SessionData(
                     session_id=session_id,
-                    timestamp=transcription.get("timestamp"),
+                    timestamp=transcription.get("timestamp") or datetime.now(),
+                    language=language,
+                    target_accent=target_accent,
                     accent_score=agent_feedback.get("accent_score", 0.0),
                     phoneme_deviations=phoneme_deviations,
                     exercises=agent_feedback.get("personalized_exercises", []),

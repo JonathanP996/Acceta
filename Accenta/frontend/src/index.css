@@ -34,3 +34,89 @@ code {
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-gray-500;
 }
+
+/* Fade in and slide up animation */
+@keyframes fadeInSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(1rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Waveform animation */
+@keyframes waveAnimation {
+  0%, 100% {
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Fade in animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.5s ease-in forwards;
+}
+
+/* Revving animation for F1 car */
+@keyframes rev {
+  0%, 100% {
+    transform: translateX(0) translateY(0) rotate(0deg);
+  }
+  10% {
+    transform: translateX(-2px) translateY(1px) rotate(-0.5deg);
+  }
+  20% {
+    transform: translateX(2px) translateY(-1px) rotate(0.5deg);
+  }
+  30% {
+    transform: translateX(-1px) translateY(2px) rotate(-0.3deg);
+  }
+  40% {
+    transform: translateX(1px) translateY(-2px) rotate(0.3deg);
+  }
+  50% {
+    transform: translateX(-2px) translateY(1px) rotate(-0.5deg);
+  }
+  60% {
+    transform: translateX(2px) translateY(-1px) rotate(0.5deg);
+  }
+  70% {
+    transform: translateX(-1px) translateY(2px) rotate(-0.3deg);
+  }
+  80% {
+    transform: translateX(1px) translateY(-2px) rotate(0.3deg);
+  }
+  90% {
+    transform: translateX(-2px) translateY(1px) rotate(-0.5deg);
+  }
+}
+
+.animate-rev {
+  animation: rev 0.1s ease-in-out infinite;
+}
+
+/* Fade in and slide up for practice box */
+@keyframes fadeInSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(2rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

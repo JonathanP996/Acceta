@@ -11,7 +11,9 @@ import Landing from './components/Landing';
 import LanguageSelection from './components/LanguageSelection';
 import PracticeLanguageSelection from './components/PracticeLanguageSelection';
 import AccentSelection from './components/AccentSelection';
+import Survey from './components/Survey';
 import InitialTest from './components/InitialTest';
+import PracticeTransition from './components/PracticeTransition';
 import Dashboard from './components/Dashboard';
 import Profile from './components/Profile';
 import Practice from './components/Practice';
@@ -53,10 +55,26 @@ function App() {
           }
         />
         <Route
+          path="/survey"
+          element={
+            <ProtectedRoute>
+              <Survey />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/initial-test"
           element={
             <ProtectedRoute>
               <InitialTest />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/practice-transition"
+          element={
+            <ProtectedRoute>
+              <PracticeTransition />
             </ProtectedRoute>
           }
         />

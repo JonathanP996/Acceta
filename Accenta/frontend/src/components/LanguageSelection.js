@@ -25,6 +25,22 @@ const LanguageSelection = () => {
     }
   }, []);
 
+  // Get progress for each language (mock data for now, can be enhanced later)
+  const getLanguageProgress = (languageId) => {
+    const storedProfile = localStorage.getItem('currentProfile');
+    if (storedProfile) {
+      try {
+        const profile = JSON.parse(storedProfile);
+        if (typeof profile.language === 'object' && profile.language.id === languageId) {
+          return profile.overallScore || 0;
+        }
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
+    return 0;
+  };
+
   const filteredLanguages = useMemo(() => {
     if (!searchQuery.trim()) {
       return LANGUAGES.sort((a, b) => b.popularity - a.popularity);
@@ -41,93 +57,114 @@ const LanguageSelection = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-accenta-primary to-accenta-secondary py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-6xl mx-auto">
-        {/* Header with Go Home button if user has profile */}
-        <div className="mb-8">
-          <div className="flex justify-between items-center mb-4">
-            {hasProfile && (
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-cyan-800 to-orange-800 relative overflow-hidden">
+      {/* Background Pattern */}
+      <div className="absolute inset-0 opacity-10">
+        <div className="absolute inset-0" style={{
+          backgroundImage: `radial-gradient(circle at 2px 2px, white 1px, transparent 0)`,
+          backgroundSize: '40px 40px'
+        }}></div>
+      </div>
+
+      {/* Header */}
+      <header className="relative z-20 px-6 py-6 bg-white/10 backdrop-blur-md border-b border-white/20">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div 
+            className="text-white text-3xl font-bold cursor-pointer hover:text-orange-300 transition-colors"
+            onClick={() => navigate('/')}
+          >
+            accenta
+          </div>
+          <nav className="hidden md:flex items-center gap-8">
+            <a href="#languages" className="text-white/90 hover:text-white font-medium transition-colors">Languages</a>
+          </nav>
+          <div className="flex items-center gap-4">
+            {hasProfile ? (
               <button
                 onClick={handleGoHome}
-                className="flex items-center gap-2 text-white hover:text-white/90 transition-colors bg-white/10 hover:bg-white/20 px-4 py-2 rounded-lg backdrop-blur-sm"
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg font-semibold"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-                </svg>
-                <span className="font-medium">Go to Home</span>
+                Dashboard
+              </button>
+            ) : (
+              <button
+                onClick={() => navigate('/login')}
+                className="text-white/90 hover:text-white font-medium transition-colors px-4 py-2"
+              >
+                Sign In
               </button>
             )}
-            {!hasProfile && <div></div>} {/* Spacer when no button */}
-            <div className="flex-1"></div>
-          </div>
-          <div className="text-center">
-            <h1 className="text-4xl font-bold text-white mb-2">Choose Your Language</h1>
-            <p className="text-white/80">Select the language you want to learn</p>
           </div>
         </div>
+      </header>
 
-        {/* Search Bar */}
-        <div className="mb-8">
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Search languages..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full px-4 py-3 pl-12 rounded-lg border-0 shadow-lg focus:ring-2 focus:ring-white"
-            />
-            <svg
-              className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
+      {/* Main Content */}
+      <main className="relative z-20 px-6 py-12">
+        <div className="max-w-7xl mx-auto">
+          {/* Title */}
+          <div className="text-center mb-12">
+            <h1 className="text-5xl md:text-6xl font-bold text-white mb-4 drop-shadow-lg">
+              Select a language
+            </h1>
           </div>
-        </div>
 
-        {/* Language Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredLanguages.map((language) => (
-            <button
-              key={language.id}
-              onClick={() => handleLanguageSelect(language)}
-              className="bg-white rounded-xl shadow-lg p-6 hover:shadow-2xl transition-all duration-300 hover:scale-105 text-left"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-4xl">{language.flag}</span>
-                <span className="text-sm text-gray-500">Popularity: {language.popularity}%</span>
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">{language.name}</h3>
-              <p className="text-sm text-gray-600">
-                {language.accents.length} accent{language.accents.length !== 1 ? 's' : ''} available
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {language.accents.slice(0, 3).map((accent) => (
-                  <span
-                    key={accent.id}
-                    className="text-xs px-2 py-1 bg-accenta-primary/10 text-accenta-primary rounded-full"
-                  >
-                    {accent.name}
-                  </span>
-                ))}
-                {language.accents.length > 3 && (
-                  <span className="text-xs px-2 py-1 text-gray-500">
-                    +{language.accents.length - 3} more
-                  </span>
-                )}
-              </div>
-            </button>
-          ))}
-        </div>
-
-        {filteredLanguages.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-white text-lg">No languages found matching "{searchQuery}"</p>
+          {/* Search Bar */}
+          <div className="mb-8 max-w-2xl mx-auto">
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search languages..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full px-4 py-3 pl-12 rounded-xl border-0 shadow-xl bg-white/95 backdrop-blur-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
+              <svg
+                className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
           </div>
-        )}
-      </div>
+
+          {/* Language Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {filteredLanguages.map((language) => {
+              const progress = getLanguageProgress(language.id);
+              return (
+                <button
+                  key={language.id}
+                  onClick={() => handleLanguageSelect(language)}
+                  className="bg-white rounded-xl shadow-lg p-6 hover:shadow-2xl transition-all duration-300 hover:scale-105 text-center group"
+                >
+                  <div className="text-6xl mb-4">{language.flag}</div>
+                  <h3 className="text-lg font-bold text-gray-900 mb-2">{language.name}</h3>
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-gray-500">Progress</span>
+                      <span className="text-sm font-semibold text-gray-900">{progress}%</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-gradient-to-r from-blue-500 to-orange-500 h-2 rounded-full transition-all duration-500"
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {filteredLanguages.length === 0 && (
+            <div className="text-center py-12">
+              <p className="text-white text-lg">No languages found matching "{searchQuery}"</p>
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 };

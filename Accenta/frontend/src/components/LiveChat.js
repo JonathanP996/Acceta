@@ -31,6 +31,78 @@ const LiveChat = () => {
   const isPlayingRef = useRef(false); // Guard to prevent multiple simultaneous playbacks
   const initAudioRef = useRef(false); // Track if audio capture has been initialized
   const replayingMessageIdRef = useRef(null); // Track which message is currently being replayed
+  const [profileSettings, setProfileSettings] = useState({
+    colorScheme: 'blueOrange',
+  });
+
+  // Load profile settings from localStorage
+  useEffect(() => {
+    const savedSettings = localStorage.getItem('profileSettings');
+    if (savedSettings) {
+      try {
+        const parsed = JSON.parse(savedSettings);
+        setProfileSettings(parsed);
+      } catch (error) {
+        console.error('Error loading profile settings:', error);
+      }
+    }
+  }, []);
+
+  // Color scheme configurations (matching Dashboard)
+  const colorSchemes = {
+    blueOrange: {
+      backgroundGradient: 'from-blue-900 via-cyan-800 to-orange-800',
+      containerGradient: 'from-blue-50 via-cyan-50 to-orange-50',
+      primary: 'bg-blue-600 hover:bg-blue-700',
+      primaryLight: 'bg-blue-100 hover:bg-blue-200',
+      primaryText: 'text-blue-600',
+      borderColor: 'border-blue-600',
+      accent: 'from-blue-500 to-orange-500',
+      avatarGradient: 'from-blue-500 to-cyan-600',
+    },
+    pink: {
+      backgroundGradient: 'from-pink-400 via-rose-400 to-fuchsia-400',
+      containerGradient: 'from-pink-50 via-rose-50 to-fuchsia-50',
+      primary: 'bg-pink-600 hover:bg-pink-700',
+      primaryLight: 'bg-pink-100 hover:bg-pink-200',
+      primaryText: 'text-pink-600',
+      borderColor: 'border-pink-600',
+      accent: 'from-pink-500 to-rose-500',
+      avatarGradient: 'from-pink-500 to-rose-600',
+    },
+    purple: {
+      backgroundGradient: 'from-purple-400 via-indigo-400 to-pink-400',
+      containerGradient: 'from-purple-50 via-indigo-50 to-pink-50',
+      primary: 'bg-purple-600 hover:bg-purple-700',
+      primaryLight: 'bg-purple-100 hover:bg-purple-200',
+      primaryText: 'text-purple-600',
+      borderColor: 'border-purple-600',
+      accent: 'from-purple-500 to-indigo-500',
+      avatarGradient: 'from-purple-500 to-indigo-600',
+    },
+    blue: {
+      backgroundGradient: 'from-blue-400 via-cyan-400 to-teal-400',
+      containerGradient: 'from-blue-50 via-cyan-50 to-teal-50',
+      primary: 'bg-blue-600 hover:bg-blue-700',
+      primaryLight: 'bg-blue-100 hover:bg-blue-200',
+      primaryText: 'text-blue-600',
+      borderColor: 'border-blue-600',
+      accent: 'from-blue-500 to-cyan-500',
+      avatarGradient: 'from-blue-500 to-cyan-600',
+    },
+    green: {
+      backgroundGradient: 'from-green-400 via-emerald-400 to-teal-400',
+      containerGradient: 'from-green-50 via-emerald-50 to-teal-50',
+      primary: 'bg-green-600 hover:bg-green-700',
+      primaryLight: 'bg-green-100 hover:bg-green-200',
+      primaryText: 'text-green-600',
+      borderColor: 'border-green-600',
+      accent: 'from-green-500 to-emerald-500',
+      avatarGradient: 'from-green-500 to-emerald-600',
+    },
+  };
+
+  const currentColorScheme = colorSchemes[profileSettings.colorScheme] || colorSchemes.blueOrange;
 
   // Get storage key for this conversation
   const getStorageKey = () => {
@@ -995,7 +1067,7 @@ const LiveChat = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50">
+    <div className={`min-h-screen bg-gradient-to-br ${currentColorScheme.backgroundGradient}`}>
       {/* Header */}
       <header className="bg-white shadow-sm">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -1035,15 +1107,12 @@ const LiveChat = () => {
         )}
         
         {/* Main Container with Audio-Reactive Avatar */}
-        <div className="bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 rounded-2xl shadow-xl min-h-[calc(100vh-250px)] flex flex-col items-center justify-center p-8">
+        <div className={`bg-gradient-to-br ${currentColorScheme.containerGradient} rounded-2xl shadow-xl min-h-[calc(100vh-250px)] flex flex-col items-center justify-center p-8`}>
           {/* Audio-Reactive Avatar - Clickable to start/stop recording */}
           <div className="mb-8">
             <div 
               onClick={toggleRecording}
               className="cursor-pointer transition-transform hover:scale-105 active:scale-95"
-              style={{ 
-                filter: isRecording ? 'drop-shadow(0 0 20px rgba(99, 102, 241, 0.8))' : 'none'
-              }}
             >
               <AudioReactiveAvatar
                 audioBlob={currentAudioBlob}
@@ -1070,7 +1139,7 @@ const LiveChat = () => {
             <div className="max-w-2xl mb-8">
               <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-lg">
                 <div className="flex items-center gap-2 mb-3 justify-center">
-                  <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center">
+                  <div className={`w-8 h-8 bg-gradient-to-br ${currentColorScheme.avatarGradient} rounded-full flex items-center justify-center`}>
                     <span className="text-white font-bold text-sm">W</span>
                   </div>
                   <span className="text-sm font-semibold text-gray-600">Wally</span>
@@ -1085,7 +1154,7 @@ const LiveChat = () => {
                     return hasAudio ? (
                       <button
                         onClick={() => replayMessageAudio(currentMessage.id)}
-                        className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-indigo-100 hover:bg-indigo-200 text-indigo-600 transition-colors"
+                        className={`flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full ${currentColorScheme.primaryLight} ${currentColorScheme.primaryText} transition-colors`}
                         title="Replay audio"
                       >
                         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -1117,7 +1186,7 @@ const LiveChat = () => {
                     console.error('Error playing pending audio:', error);
                   }
                 }}
-                className="px-6 py-3 bg-indigo-500 text-white rounded-lg font-semibold hover:bg-indigo-600 transition-colors flex items-center gap-2"
+                className={`px-6 py-3 ${currentColorScheme.primary} text-white rounded-lg font-semibold transition-colors flex items-center gap-2`}
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                   <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
@@ -1142,7 +1211,7 @@ const LiveChat = () => {
                       <div
                         key={message.id}
                         className={`text-sm flex items-start gap-2 ${
-                          message.type === 'user' ? 'text-right text-indigo-700 justify-end' : 'text-left text-gray-600'
+                          message.type === 'user' ? `text-right ${currentColorScheme.primaryText} justify-end` : 'text-left text-gray-600'
                         }`}
                       >
                         <div className="flex-1">
@@ -1157,7 +1226,7 @@ const LiveChat = () => {
                         {message.type === 'ai' && messageAudioMap.has(message.id) && (
                           <button
                             onClick={() => replayMessageAudio(message.id)}
-                            className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-indigo-100 hover:bg-indigo-200 text-indigo-600 transition-colors"
+                            className={`flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full ${currentColorScheme.primaryLight} ${currentColorScheme.primaryText} transition-colors`}
                             title="Replay audio"
                           >
                             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
@@ -1177,7 +1246,7 @@ const LiveChat = () => {
           {isProcessing && (
             <div className="mb-6">
               <div className="bg-white/80 backdrop-blur-sm rounded-full px-6 py-3 flex items-center gap-3">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600"></div>
+                <div className={`animate-spin rounded-full h-5 w-5 border-b-2 ${currentColorScheme.borderColor}`}></div>
                 <span className="text-sm text-gray-700 font-medium">Processing your message...</span>
               </div>
             </div>

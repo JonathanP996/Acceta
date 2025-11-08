@@ -124,7 +124,9 @@ def _get_voice_for_accent(accent: str, robotic: bool = False) -> str:
         return "pNInz6obpgDQGcFmaJgB"
     
     # Map common accent names to voice IDs
+    # All voices are ElevenLabs voices - no fallback
     voice_map = {
+        # English accents
         "british": "21m00Tcm4TlvDq8ikWAM",  # Rachel (British)
         "british english": "21m00Tcm4TlvDq8ikWAM",
         "american": "EXAVITQu4vr4xnSDxMaL",  # Bella (American)
@@ -137,8 +139,56 @@ def _get_voice_for_accent(accent: str, robotic: bool = False) -> str:
         "irish english": "21m00Tcm4TlvDq8ikWAM",
         "scottish": "21m00Tcm4TlvDq8ikWAM",  # Use British for Scottish
         "scottish english": "21m00Tcm4TlvDq8ikWAM",
+        # Spanish accents
         "spanish": "ThT5KcBeYPX3keUQqHPh",  # Dorothy (Spanish)
+        "castilian": "ThT5KcBeYPX3keUQqHPh",  # Castilian Spanish
+        "castilian spanish": "ThT5KcBeYPX3keUQqHPh",
+        "mexican": "ThT5KcBeYPX3keUQqHPh",  # Mexican Spanish
+        "mexican spanish": "ThT5KcBeYPX3keUQqHPh",
+        "argentinian": "ThT5KcBeYPX3keUQqHPh",  # Argentinian Spanish
+        "argentinian spanish": "ThT5KcBeYPX3keUQqHPh",
+        "colombian": "ThT5KcBeYPX3keUQqHPh",  # Colombian Spanish
+        "colombian spanish": "ThT5KcBeYPX3keUQqHPh",
+        # French accents
         "french": "VR6AewLTigWG4xSOukaG",  # Arnold (French)
+        "parisian": "VR6AewLTigWG4xSOukaG",  # Parisian French
+        "parisian french": "VR6AewLTigWG4xSOukaG",
+        "quebecois": "VR6AewLTigWG4xSOukaG",  # Québécois French
+        "quebecois french": "VR6AewLTigWG4xSOukaG",
+        "belgian": "VR6AewLTigWG4xSOukaG",  # Belgian French
+        "belgian french": "VR6AewLTigWG4xSOukaG",
+        # German accents
+        "german": "EXAVITQu4vr4xnSDxMaL",  # Use default for German
+        "standard german": "EXAVITQu4vr4xnSDxMaL",
+        "austrian": "EXAVITQu4vr4xnSDxMaL",  # Austrian German
+        "austrian german": "EXAVITQu4vr4xnSDxMaL",
+        "swiss": "EXAVITQu4vr4xnSDxMaL",  # Swiss German
+        "swiss german": "EXAVITQu4vr4xnSDxMaL",
+        # Italian accents
+        "italian": "EXAVITQu4vr4xnSDxMaL",  # Use default for Italian
+        "tuscan": "EXAVITQu4vr4xnSDxMaL",  # Tuscan Italian
+        "tuscan italian": "EXAVITQu4vr4xnSDxMaL",
+        "roman": "EXAVITQu4vr4xnSDxMaL",  # Roman Italian
+        "roman italian": "EXAVITQu4vr4xnSDxMaL",
+        "southern": "EXAVITQu4vr4xnSDxMaL",  # Southern Italian
+        "southern italian": "EXAVITQu4vr4xnSDxMaL",
+        # Portuguese accents
+        "portuguese": "EXAVITQu4vr4xnSDxMaL",  # Use default for Portuguese
+        "european portuguese": "EXAVITQu4vr4xnSDxMaL",
+        "brazilian": "EXAVITQu4vr4xnSDxMaL",  # Brazilian Portuguese
+        "brazilian portuguese": "EXAVITQu4vr4xnSDxMaL",
+        # Mandarin accents
+        "mandarin": "EXAVITQu4vr4xnSDxMaL",  # Use default for Mandarin
+        "beijing": "EXAVITQu4vr4xnSDxMaL",  # Beijing Mandarin
+        "beijing mandarin": "EXAVITQu4vr4xnSDxMaL",
+        "taiwanese": "EXAVITQu4vr4xnSDxMaL",  # Taiwanese Mandarin
+        "taiwanese mandarin": "EXAVITQu4vr4xnSDxMaL",
+        # Japanese accents
+        "japanese": "EXAVITQu4vr4xnSDxMaL",  # Use default for Japanese
+        "tokyo": "EXAVITQu4vr4xnSDxMaL",  # Tokyo Japanese
+        "tokyo japanese": "EXAVITQu4vr4xnSDxMaL",
+        "osaka": "EXAVITQu4vr4xnSDxMaL",  # Osaka Japanese
+        "osaka japanese": "EXAVITQu4vr4xnSDxMaL",
     }
     
     # Try exact match first

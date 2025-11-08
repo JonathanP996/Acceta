@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
 import { analysisService, ttsService } from '../services/api';
 import { getTestPrompts } from '../data/languagePrompts';
+import { getSkillLevel, SKILL_LEVELS } from '../data/skills';
 
 const InitialTest = () => {
   const location = useLocation();
@@ -15,9 +16,19 @@ const InitialTest = () => {
   const [audioCapture, setAudioCapture] = useState(null);
   const [testResults, setTestResults] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+  const [hasPlayedOnce, setHasPlayedOnce] = useState(false);
+  const [waveformTime, setWaveformTime] = useState(0);
+  const waveformAnimationRef = useRef(null);
+  const [audioDataArray, setAudioDataArray] = useState(null);
+  const [showResults, setShowResults] = useState(false);
+  const [profileSettings, setProfileSettings] = useState({
+    colorScheme: 'blueOrange',
+  });
   
-  // Get language-specific test prompts
-  const TEST_PROMPTS = language ? getTestPrompts(language.id) : getTestPrompts('english');
+  // Get language-specific test prompts - limit to 5 questions
+  const allPrompts = language ? getTestPrompts(language.id) : getTestPrompts('english');
+  const TEST_PROMPTS = allPrompts.slice(0, 5);
 
   useEffect(() => {
     if (!language || !accent) {
@@ -46,18 +57,155 @@ const InitialTest = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Load profile settings from localStorage
+  useEffect(() => {
+    const savedSettings = localStorage.getItem('profileSettings');
+    if (savedSettings) {
+      try {
+        const parsed = JSON.parse(savedSettings);
+        setProfileSettings(parsed);
+      } catch (error) {
+        console.error('Error loading profile settings:', error);
+      }
+    }
+  }, []);
+
+  // Fade in animation on mount
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // Color scheme configurations (matching Dashboard)
+  const colorSchemes = {
+    blueOrange: {
+      gradient: 'from-blue-900 via-cyan-800 to-orange-800',
+      backgroundGradient: 'from-blue-900 via-cyan-800 to-orange-800',
+    },
+    pink: {
+      gradient: 'from-pink-50 via-rose-50 to-fuchsia-50',
+      backgroundGradient: 'from-pink-400 via-rose-400 to-fuchsia-400',
+    },
+    purple: {
+      gradient: 'from-purple-50 via-indigo-50 to-pink-50',
+      backgroundGradient: 'from-purple-400 via-indigo-400 to-pink-400',
+    },
+    blue: {
+      gradient: 'from-blue-50 via-cyan-50 to-teal-50',
+      backgroundGradient: 'from-blue-400 via-cyan-400 to-teal-400',
+    },
+    green: {
+      gradient: 'from-green-50 via-emerald-50 to-teal-50',
+      backgroundGradient: 'from-green-400 via-emerald-400 to-teal-400',
+    },
+  };
+
+  const currentColorScheme = colorSchemes[profileSettings.colorScheme] || colorSchemes.blueOrange;
+
+  // Color complements for waveform
+  const colorComplements = {
+    blueOrange: {
+      primary: '#10B981', // Green (complement of blue/orange)
+      secondary: '#059669',
+      light: '#34D399',
+    },
+    pink: {
+      primary: '#10B981',
+      secondary: '#059669',
+      light: '#34D399',
+    },
+    purple: {
+      primary: '#F59E0B',
+      secondary: '#D97706',
+      light: '#FBBF24',
+    },
+    blue: {
+      primary: '#F97316',
+      secondary: '#EA580C',
+      light: '#FB923C',
+    },
+    green: {
+      primary: '#EC4899',
+      secondary: '#DB2777',
+      light: '#F472B6',
+    },
+  };
+
+  const currentComplement = colorComplements[profileSettings.colorScheme] || colorComplements.blueOrange;
+
+  // Autoplay audio when prompt changes
+  useEffect(() => {
+    if (TEST_PROMPTS[currentPrompt] && accent && !showResults) {
+      setHasPlayedOnce(false);
+      const timer = setTimeout(() => {
+        playPrompt();
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPrompt, showResults]);
+
+  // Animate waveform when recording - reactive to mic input
+  useEffect(() => {
+    if (isRecording && audioCapture && audioCapture.analyser) {
+      const analyser = audioCapture.analyser;
+      const dataArray = new Uint8Array(analyser.fftSize);
+      
+      const animate = () => {
+        analyser.getByteTimeDomainData(dataArray);
+        
+        let hasAudio = false;
+        for (let i = 0; i < dataArray.length; i++) {
+          if (Math.abs(dataArray[i] - 128) > 0.5) {
+            hasAudio = true;
+            break;
+          }
+        }
+        
+        if (hasAudio) {
+          setAudioDataArray([...dataArray]);
+        } else {
+          setAudioDataArray(null);
+        }
+        
+        waveformAnimationRef.current = requestAnimationFrame(animate);
+      };
+      waveformAnimationRef.current = requestAnimationFrame(animate);
+      return () => {
+        if (waveformAnimationRef.current) {
+          cancelAnimationFrame(waveformAnimationRef.current);
+          waveformAnimationRef.current = null;
+        }
+      };
+    } else {
+      setAudioDataArray(null);
+      if (waveformAnimationRef.current) {
+        cancelAnimationFrame(waveformAnimationRef.current);
+        waveformAnimationRef.current = null;
+      }
+    }
+  }, [isRecording, audioCapture]);
+
   const playPrompt = async () => {
     if (!accent) return;
     
     setIsPlaying(true);
+    setHasPlayedOnce(true);
     try {
       // Use ElevenLabs TTS via backend
       // Extract accent name (e.g., "American English" -> "american")
       const accentName = accent.name.toLowerCase().replace(' english', '').replace('english', '').trim();
+      console.log('🎵 Calling ElevenLabs TTS for initial test:', {
+        prompt: TEST_PROMPTS[currentPrompt],
+        accentName,
+        accentFull: accent.name
+      });
+      
+      // Ensure we're using ElevenLabs - no fallback
       const audioBlob = await ttsService.generateSpeech(
         TEST_PROMPTS[currentPrompt],
-        null, // voice_id - will use default
-        accentName // accent name for voice selection
+        null, // voice_id - will use accent-based selection from backend
+        accentName, // accent name for voice selection (MUST be provided)
+        false // robotic = false for test prompts (natural voice)
       );
       
       // Create audio element and play
@@ -77,28 +225,15 @@ const InitialTest = () => {
       
       await audio.play();
     } catch (error) {
-      console.error('Error generating/playing TTS:', error);
+      console.error('❌ Error generating/playing TTS with ElevenLabs:', error);
       setIsPlaying(false);
-      // Fallback to Web Speech API if TTS fails
-      try {
-        const utterance = new SpeechSynthesisUtterance(TEST_PROMPTS[currentPrompt]);
-        const langCodeMap = {
-          'english': 'en-US',
-          'spanish': 'es-ES',
-          'french': 'fr-FR',
-          'german': 'de-DE',
-          'italian': 'it-IT',
-          'portuguese': 'pt-PT',
-          'mandarin': 'zh-CN',
-          'japanese': 'ja-JP',
-        };
-        utterance.lang = langCodeMap[language.id] || language.id;
-        utterance.onend = () => setIsPlaying(false);
-        speechSynthesis.speak(utterance);
-      } catch (fallbackError) {
-        console.error('Fallback TTS also failed:', fallbackError);
-        setIsPlaying(false);
-      }
+      
+      // Show user-friendly error message
+      const errorMessage = error.message || 'Failed to generate audio with ElevenLabs';
+      alert(`Unable to play audio: ${errorMessage}\n\nPlease ensure:\n- Backend server is running\n- ElevenLabs API key is configured\n- Check browser console for details`);
+      
+      // DO NOT use Web Speech API fallback - ElevenLabs is required
+      throw error; // Re-throw to prevent any fallback
     }
   };
 
@@ -157,11 +292,12 @@ const InitialTest = () => {
         promptIndex: currentPrompt,
       }]);
 
-      // Move to next prompt
+      // Move to next prompt immediately (no feedback display)
       if (currentPrompt < TEST_PROMPTS.length - 1) {
         setCurrentPrompt(currentPrompt + 1);
+        setHasPlayedOnce(false);
       } else {
-        // Test complete
+        // Test complete - show results
         finishTest();
       }
     } catch (error) {
@@ -175,23 +311,34 @@ const InitialTest = () => {
   };
 
   const finishTest = () => {
+    setShowResults(true);
+    setIsProcessing(false);
+  };
+
+  const handleContinueToDashboard = () => {
     // Calculate average score
     const avgScore = testResults.length > 0
       ? testResults.reduce((sum, r) => sum + (r.result.accent_score || 0), 0) / testResults.length
       : 0;
 
+    // Calculate skill level from average score
+    const skillRank = getSkillLevel(avgScore);
+
     // Mark that user has completed initial test and has a profile
     localStorage.setItem('hasCompletedInitialTest', 'true');
     localStorage.setItem('hasVisitedDashboard', 'true');
 
-    // Navigate to dashboard with results
-    navigate('/dashboard', {
+    // Navigate to practice transition screen
+    navigate('/practice-transition', {
       state: {
-        testComplete: true,
+        profile: {
         language: language,
+          accent: accent,
+          overallScore: avgScore,
+          skillLevel: skillRank,
+        },
         accent: accent,
-        initialScore: avgScore,
-        results: testResults,
+        fromInitialTest: true,
       },
     });
   };
@@ -231,6 +378,92 @@ const InitialTest = () => {
   };
 
   const progress = ((currentPrompt + 1) / TEST_PROMPTS.length) * 100;
+
+  // Calculate skill rank for results screen
+  const calculateSkillRank = () => {
+    if (testResults.length === 0) return null;
+    const avgScore = testResults.reduce((sum, r) => sum + (r.result.accent_score || 0), 0) / testResults.length;
+    return getSkillLevel(avgScore);
+  };
+
+  const skillRank = showResults ? calculateSkillRank() : null;
+  const avgScore = showResults && testResults.length > 0
+    ? testResults.reduce((sum, r) => sum + (r.result.accent_score || 0), 0) / testResults.length
+    : 0;
+
+  // Results Screen
+  if (showResults) {
+    return (
+      <div className={`min-h-screen bg-gradient-to-br ${currentColorScheme.backgroundGradient} flex flex-col opacity-90`}>
+        <div className="flex-1 flex items-center justify-center px-4 pb-4">
+          <div 
+            className={`bg-white rounded-3xl shadow-2xl p-8 w-full max-w-4xl flex flex-col transition-all duration-700 ${
+              isMounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
+            }`}
+            style={{ minHeight: 'calc(100vh - 200px)', height: 'auto' }}
+          >
+            <div className="flex-1 flex flex-col items-center justify-center text-center">
+              <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-6">
+                Assessment Complete!
+              </h1>
+              
+              {skillRank && (
+                <div className="mb-8">
+                  <div className="inline-block px-6 py-3 bg-gradient-to-r from-blue-50 to-purple-50 rounded-full mb-4">
+                    <p className="text-sm text-gray-600 mb-1">Your Skill Rank</p>
+                    <p 
+                      className="text-3xl font-bold"
+                      style={{ 
+                        color: skillRank.color === 'red' ? '#DC2626' :
+                               skillRank.color === 'orange' ? '#EA580C' :
+                               skillRank.color === 'yellow' ? '#CA8A04' :
+                               skillRank.color === 'green' ? '#16A34A' :
+                               skillRank.color === 'blue' ? '#2563EB' : '#6B7280'
+                      }}
+                    >
+                      {skillRank.name}
+                    </p>
+                  </div>
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-gray-700">Overall Score</span>
+                      <span className="text-2xl font-bold text-accenta-primary">
+                        {avgScore.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-3">
+                      <div
+                        className="h-3 rounded-full transition-all duration-500"
+                        style={{ 
+                          width: `${avgScore}%`,
+                          backgroundColor: skillRank.color === 'red' ? '#DC2626' :
+                                           skillRank.color === 'orange' ? '#EA580C' :
+                                           skillRank.color === 'yellow' ? '#CA8A04' :
+                                           skillRank.color === 'green' ? '#16A34A' :
+                                           skillRank.color === 'blue' ? '#2563EB' : '#6B7280'
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-lg text-gray-600 mb-8 max-w-2xl">
+                You've completed all {TEST_PROMPTS.length} questions. Your skill rank has been calculated based on your pronunciation accuracy.
+              </p>
+
+              <button
+                onClick={handleContinueToDashboard}
+                className="px-8 py-4 bg-accenta-primary text-white rounded-lg font-semibold text-lg hover:bg-accenta-secondary transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+              >
+                Start Practice Session
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Intro/Onboarding Screen
   if (showIntro) {
@@ -405,270 +638,215 @@ const InitialTest = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-accenta-primary to-accenta-secondary py-12 px-4">
-      <div className="max-w-4xl mx-auto">
-        {/* Back Button */}
+    <div className={`min-h-screen bg-gradient-to-br ${currentColorScheme.backgroundGradient} flex flex-col opacity-90`}>
+      {/* Progress Bar at Top */}
+      <div className={`w-full px-4 pt-4 pb-2 transition-all duration-700 ${
+        isMounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'
+      }`}>
+        <div className="max-w-7xl mx-auto">
+          {/* Question Number */}
+          <div className="flex justify-between items-center mb-2">
         <button
           onClick={handleBack}
           disabled={isRecording || isProcessing}
-          className="mb-4 flex items-center gap-2 text-white hover:text-white/80 transition-colors bg-white/10 hover:bg-white/20 px-4 py-2 rounded-lg backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-white hover:text-gray-200 flex items-center drop-shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-          <span>Exit Test</span>
+              Back
         </button>
-
-        {/* Progress Bar */}
-        <div className="mb-8">
-          <div className="flex justify-between text-white mb-2">
-            <span className="text-lg font-semibold">Initial Assessment</span>
-            <span className="text-lg font-semibold">
+            <span className="text-white text-xl font-semibold drop-shadow-lg">
               {currentPrompt + 1} / {TEST_PROMPTS.length}
             </span>
           </div>
-          <div className="w-full bg-white/20 rounded-full h-3">
+          {/* Progress Bar */}
+          <div className="bg-white/30 rounded-full h-3 shadow-lg">
             <div
-              className="bg-white h-3 rounded-full transition-all duration-300"
+              className="bg-white h-3 rounded-full transition-all duration-300 shadow-md"
               style={{ width: `${progress}%` }}
             />
           </div>
+          </div>
         </div>
 
-        {/* Main Card */}
-        <div className="bg-white rounded-2xl shadow-2xl p-8">
-          <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-gray-900 mb-4">
+      {/* Main Practice Card - Full Screen */}
+      <div className="flex-1 flex items-center justify-center px-4 pb-4">
+        <div 
+          className={`bg-white rounded-3xl shadow-2xl p-8 w-full max-w-4xl flex flex-col transition-all duration-700 ${
+            isMounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
+          }`}
+          style={{ minHeight: 'calc(100vh - 200px)', height: 'auto' }}
+        >
+          {/* Static Content Section - Centered */}
+          <div className="flex-shrink-0 flex flex-col items-center justify-center relative" style={{ minHeight: '400px', paddingTop: '80px' }}>
+            {/* Phrase - Centered in available space */}
+            <div className={`text-center transition-all duration-700 delay-200 flex items-center justify-center ${
+              isMounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
+            }`} style={{ width: '100%', justifyContent: 'center', alignItems: 'center' }}>
+              <h2 className="text-5xl md:text-6xl lg:text-7xl font-bold leading-tight text-gray-900 text-center px-4">
               {TEST_PROMPTS[currentPrompt]}
             </h2>
-            <p className="text-gray-600">
-              Listen to the phrase, then repeat it in {accent.name} accent
-            </p>
           </div>
 
-          {/* Audio Controls */}
-          <div className="flex justify-center gap-4 mb-8">
-            <button
-              onClick={playPrompt}
-              disabled={isPlaying || isRecording}
-              className="px-6 py-3 bg-accenta-primary text-white rounded-lg font-semibold hover:bg-accenta-secondary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
-              </svg>
-              {isPlaying ? 'Playing...' : 'Play Phrase'}
-            </button>
-
-            {!isRecording ? (
+            {/* Replay Button - Below phrase */}
+            <div className={`flex justify-center mt-6 transition-opacity duration-300 ${hasPlayedOnce && !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
               <button
-                onClick={startRecording}
-                disabled={isPlaying || isProcessing || !audioCapture}
-                className="px-6 py-3 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                onClick={playPrompt}
+                disabled={isRecording || isPlaying || !hasPlayedOnce}
+                className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 012 0v2a1 1 0 11-2 0V9zm5-1a1 1 0 10-2 0v2a1 1 0 102 0V8z" clipRule="evenodd" />
+                  <path d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" />
                 </svg>
-                Start Recording
+                Replay
               </button>
-            ) : (
-              <button
-                onClick={stopRecording}
-                className="px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 flex items-center gap-2 animate-pulse"
-              >
-                <div className="w-3 h-3 bg-white rounded-full" />
-                Recording... Click to Stop
-              </button>
-            )}
-          </div>
-
-          {isProcessing && (
-            <div className="text-center text-gray-600">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-accenta-primary"></div>
-              <p className="mt-2">Analyzing your pronunciation...</p>
             </div>
-          )}
 
-          {/* Show feedback for current/last result */}
-          {testResults.length > 0 && testResults[testResults.length - 1]?.result && (
-            <div className="mt-8 p-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border-2 border-blue-200">
-              <h3 className="text-xl font-bold text-gray-900 mb-4">Your Results</h3>
-              
-              {/* Text Match Warning */}
-              {testResults[testResults.length - 1].result.text_match_warning && (
-                <div className="mb-4 p-4 bg-yellow-100 border-l-4 border-yellow-500 rounded">
-                  <p className="text-yellow-800 font-semibold">
-                    ⚠️ {testResults[testResults.length - 1].result.text_match_warning}
-                  </p>
-                  {testResults[testResults.length - 1].result.word_accuracy !== undefined && (
-                    <p className="text-sm text-yellow-700 mt-1">
-                      Word match: {testResults[testResults.length - 1].result.word_accuracy}%
-                    </p>
-                  )}
+            {/* Recording Button with Waveform Animation - Below replay */}
+            <div className="flex flex-col items-center justify-center relative mt-6" style={{ minHeight: '200px', width: '400px' }}>
+              {/* Waveform Background - Always visible when recording */}
+              {isRecording && (
+                <div 
+                  className="absolute flex items-center justify-center"
+                  style={{ 
+                    width: '400px', 
+                    height: '200px',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -60%)',
+                    zIndex: 0,
+                    animation: 'fadeIn 0.3s ease-in forwards',
+                    opacity: 1
+                  }}
+                >
+                  <svg 
+                    width="400" 
+                    height="200" 
+                    style={{ 
+                      background: 'transparent'
+                    }}
+                  >
+                    <defs>
+                      <linearGradient id={`waveGradient-test-${currentPrompt}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stopColor={currentComplement.light} stopOpacity="0.3" />
+                        <stop offset="50%" stopColor={currentComplement.primary} stopOpacity="1" />
+                        <stop offset="100%" stopColor={currentComplement.light} stopOpacity="0.3" />
+                      </linearGradient>
+                    </defs>
+                    {/* Three wavy lines - flat normally, reactive to audio */}
+                    {[0, 1, 2].map((lineIndex) => {
+                      const centerY = 100;
+                      const offset = 0;
+                      const points = [];
+                      const numPoints = 200;
+                      
+                      if (audioDataArray && audioDataArray.length > 0) {
+                        const dataLength = audioDataArray.length;
+                        const samplesPerPoint = Math.max(1, Math.floor(dataLength / numPoints));
+                        
+                        for (let i = 0; i <= numPoints; i++) {
+                          const x = (i / numPoints) * 400;
+                          const dataIndex = Math.min(Math.floor((i / numPoints) * dataLength), dataLength - 1);
+                          
+                          let sum = 0;
+                          let count = 0;
+                          for (let j = 0; j < samplesPerPoint && (dataIndex + j) < dataLength; j++) {
+                            sum += audioDataArray[dataIndex + j];
+                            count++;
+                          }
+                          const avgValue = count > 0 ? sum / count : 128;
+                          
+                          const centerDistance = Math.abs(x - 200) / 200;
+                          const baseAmplitude = (1 - centerDistance) * 25 + 5;
+                          const normalizedAudio = (avgValue - 128) / 128;
+                          const amplifiedAudio = normalizedAudio * 2.5;
+                          const audioAmplitude = amplifiedAudio * baseAmplitude;
+                          const phase = lineIndex * Math.PI / 4;
+                          const y = centerY + offset + audioAmplitude + Math.sin((x * 0.01) + phase) * 2;
+                          points.push(`${x},${y}`);
+                        }
+                      } else {
+                        for (let i = 0; i <= numPoints; i++) {
+                          const x = (i / numPoints) * 400;
+                          const y = centerY + offset;
+                          points.push(`${x},${y}`);
+                        }
+                      }
+                      
+                      return (
+                        <polyline
+                          key={lineIndex}
+                          points={points.join(' ')}
+                          fill="none"
+                          stroke={`url(#waveGradient-test-${currentPrompt})`}
+                          strokeWidth="2"
+                          style={{
+                            transition: 'opacity 0.1s ease',
+                            opacity: 1
+                          }}
+                        />
+                      );
+                    })}
+                  </svg>
                 </div>
               )}
               
-              {/* Word Accuracy (if available and good) */}
-              {testResults[testResults.length - 1].result.word_accuracy !== undefined && !testResults[testResults.length - 1].result.text_match_warning && (
-                <div className="mb-4 p-3 bg-green-50 rounded">
-                  <p className="text-sm text-green-700">
-                    ✅ Word accuracy: {testResults[testResults.length - 1].result.word_accuracy}%
-                  </p>
+              {/* Record Button - Centered in waveform area */}
+              <div className="relative z-10 flex flex-col items-center justify-center">
+                {!isRecording ? (
+                  <button
+                    onClick={startRecording}
+                    disabled={isPlaying || isProcessing || !audioCapture}
+                    className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
+                  >
+                    <svg className="w-8 h-8 text-gray-900" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                ) : (
+                  <button
+                    onClick={stopRecording}
+                    className="w-20 h-20 bg-black rounded-full flex items-center justify-center shadow-lg hover:shadow-xl transition-all transform hover:scale-105 active:scale-95"
+                  >
+                    <div className="w-6 h-6 bg-white rounded-sm"></div>
+                  </button>
+                )}
+                {/* Label below button */}
+                <div className="mt-3">
+                  <div className="bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-md">
+                    <div className="absolute -top-1 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-gray-800"></div>
+                    {isRecording ? 'Recording...' : 'Tap to speak'}
                 </div>
-              )}
-              
-              {/* Scoring Breakdown (Detailed Analysis) */}
-              {testResults[testResults.length - 1].result.scoring_breakdown && (
-                <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                  <h4 className="text-sm font-semibold text-gray-900 mb-3">📊 Detailed Scoring Breakdown</h4>
-                  
-                  {/* Speaking Rate */}
-                  {testResults[testResults.length - 1].result.scoring_breakdown.speaking_rate && (
-                    <div className="mb-3 p-2 bg-white rounded">
-                      <p className="text-xs font-semibold text-gray-700 mb-1">Speaking Rate:</p>
-                      <p className="text-xs text-gray-600">
-                        {testResults[testResults.length - 1].result.scoring_breakdown.speaking_rate.words_per_second} words/sec • {' '}
-                        {testResults[testResults.length - 1].result.scoring_breakdown.speaking_rate.phonemes_per_second} phonemes/sec • {' '}
-                        {testResults[testResults.length - 1].result.scoring_breakdown.speaking_rate.total_duration}s duration
-                      </p>
-                    </div>
-                  )}
-                  
-                  {/* Global Features */}
-                  {testResults[testResults.length - 1].result.scoring_breakdown.global_features && (
-                    <div className="mb-3 p-2 bg-white rounded">
-                      <p className="text-xs font-semibold text-gray-700 mb-1">Your Voice Features:</p>
-                      <div className="text-xs text-gray-600 space-y-1">
-                        {testResults[testResults.length - 1].result.scoring_breakdown.global_features.pitch_analysis && (
-                          <p>
-                            Pitch: {testResults[testResults.length - 1].result.scoring_breakdown.global_features.pitch_analysis.your_pitch_hz} Hz
-                            {' '}(Reference: {testResults[testResults.length - 1].result.scoring_breakdown.global_features.pitch_analysis.reference_range})
-                            {' '}• Match: {Math.round(testResults[testResults.length - 1].result.scoring_breakdown.global_features.pitch_analysis.match_probability * 100)}%
-                          </p>
-                        )}
-                        {testResults[testResults.length - 1].result.scoring_breakdown.global_features.intensity && (
-                          <p>
-                            Intensity: {testResults[testResults.length - 1].result.scoring_breakdown.global_features.intensity}
-                            {' '}(Normalized: {testResults[testResults.length - 1].result.scoring_breakdown.global_features.intensity_normalized})
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* Summary */}
-                  {testResults[testResults.length - 1].result.scoring_breakdown.summary && (
-                    <div className="p-2 bg-blue-50 rounded">
-                      <p className="text-xs font-semibold text-blue-900 mb-1">Analysis Summary:</p>
-                      <p className="text-xs text-blue-700">
-                        Analyzed {testResults[testResults.length - 1].result.scoring_breakdown.summary.total_phonemes_analyzed} phonemes • {' '}
-                        Average deviation: {testResults[testResults.length - 1].result.scoring_breakdown.summary.average_deviation} • {' '}
-                        {testResults[testResults.length - 1].result.scoring_breakdown.summary.native_boost_applied ? '✅ Native speaker boost applied' : ''}
-                        {testResults[testResults.length - 1].result.scoring_breakdown.summary.user_baseline_used ? ' • ✅ Personalized baseline used' : ''}
-                      </p>
-                    </div>
-                  )}
-                  
-                  {/* Expandable Details */}
-                  <details className="mt-2">
-                    <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-900">
-                      Show detailed per-phoneme analysis ({testResults[testResults.length - 1].result.scoring_breakdown.per_phoneme_details?.length || 0} phonemes)
-                    </summary>
-                    <div className="mt-2 max-h-60 overflow-y-auto space-y-2">
-                      {testResults[testResults.length - 1].result.scoring_breakdown.per_phoneme_details?.slice(0, 10).map((detail, idx) => (
-                        <div key={idx} className="p-2 bg-white rounded text-xs">
-                          <p className="font-semibold">{detail.phoneme}: {detail.final_score.accent_score}%</p>
-                          <p className="text-gray-600">
-                            Pitch: {detail.features.pitch_hz}Hz ({detail.probabilities.pitch_prob * 100}% match) • {' '}
-                            Duration: {detail.features.duration_seconds}s ({detail.probabilities.duration_prob * 100}% match) • {' '}
-                            Intensity: {detail.probabilities.intensity_prob * 100}% match
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                </div>
-              )}
-              
-              {/* Accent Score */}
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold text-gray-700">Accent Accuracy</span>
-                  <span className="text-2xl font-bold text-accenta-primary">
-                    {testResults[testResults.length - 1].result.accent_score?.toFixed(1) || 0}%
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-3">
-                  <div
-                    className="bg-accenta-primary h-3 rounded-full transition-all duration-500"
-                    style={{ width: `${testResults[testResults.length - 1].result.accent_score || 0}%` }}
-                  />
                 </div>
               </div>
+            </div>
 
-              {/* Feedback Summary */}
-              {testResults[testResults.length - 1].result.feedback_summary && (
-                <div className="mb-4 p-4 bg-white rounded-lg">
-                  <p className="text-gray-800">{testResults[testResults.length - 1].result.feedback_summary}</p>
-                </div>
-              )}
-
-              {/* Strengths */}
-              {testResults[testResults.length - 1].result.strengths && testResults[testResults.length - 1].result.strengths.length > 0 && (
-                <div className="mb-4">
-                  <h4 className="text-sm font-semibold text-green-700 mb-2">✅ Strengths</h4>
-                  <ul className="list-disc list-inside space-y-1">
-                    {testResults[testResults.length - 1].result.strengths.map((strength, idx) => (
-                      <li key={idx} className="text-sm text-green-600">{strength}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Weaknesses */}
-              {testResults[testResults.length - 1].result.weaknesses && testResults[testResults.length - 1].result.weaknesses.length > 0 && (
-                <div className="mb-4">
-                  <h4 className="text-sm font-semibold text-orange-700 mb-2">⚠️ Areas to Improve</h4>
-                  <ul className="list-disc list-inside space-y-1">
-                    {testResults[testResults.length - 1].result.weaknesses.map((weakness, idx) => (
-                      <li key={idx} className="text-sm text-orange-600">{weakness}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Exercises */}
-              {testResults[testResults.length - 1].result.personalized_exercises && testResults[testResults.length - 1].result.personalized_exercises.length > 0 && (
-                <div>
-                  <h4 className="text-sm font-semibold text-blue-700 mb-2">💡 Practice Tips</h4>
-                  <ul className="list-disc list-inside space-y-1">
-                    {testResults[testResults.length - 1].result.personalized_exercises.map((exercise, idx) => (
-                      <li key={idx} className="text-sm text-blue-600">{exercise}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+            {/* Processing Indicator */}
+            {isProcessing && (
+              <div className="text-center text-gray-600 mt-8">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-accenta-primary"></div>
+                <p className="mt-2">Analyzing your pronunciation...</p>
             </div>
           )}
-
-          {/* Results Summary */}
-          {testResults.length > 0 && (
-            <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-semibold text-gray-900 mb-2">Progress</h3>
-              <p className="text-sm text-gray-600">
-                Completed: {testResults.length} prompts
-              </p>
-            </div>
-          )}
-        </div>
 
         {/* Skip Button (for testing) */}
-        <div className="text-center mt-4">
+            <div className="mt-8 text-center">
           <button
-            onClick={() => setCurrentPrompt(Math.min(currentPrompt + 1, TEST_PROMPTS.length - 1))}
-            className="text-white/80 hover:text-white text-sm"
+                onClick={() => {
+                  if (currentPrompt < TEST_PROMPTS.length - 1) {
+                    setCurrentPrompt(currentPrompt + 1);
+                    setHasPlayedOnce(false);
+                  } else {
+                    finishTest();
+                  }
+                }}
+                className="text-gray-500 hover:text-gray-700 text-sm underline"
           >
             Skip (for testing)
           </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
