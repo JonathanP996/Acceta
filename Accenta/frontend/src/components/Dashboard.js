@@ -211,9 +211,9 @@ const Dashboard = () => {
             <p className="text-gray-600 mt-1">
               {(() => {
                 const hour = new Date().getHours();
-                if (hour < 12) return 'Good morning! Ready to practice your accent?';
-                if (hour < 18) return 'Good afternoon! Let\'s continue improving your pronunciation.';
-                return 'Good evening! Time for some accent practice.';
+                if (hour < 12) return 'Good morning! Ready to chat?';
+                if (hour < 18) return 'Good afternoon! How\'s your day going?';
+                return 'Good evening! What\'s up?';
               })()}
             </p>
           </div>
@@ -362,7 +362,7 @@ const Dashboard = () => {
                         <div>
                           <h4 className="text-2xl font-bold mb-2">Chat with Wally</h4>
                           <p className="text-white/90 text-lg">
-                            Have a natural conversation with Wally, your friendly AI coach who speaks in {currentProfile.accent} accent
+                            Have a natural conversation with Wally, your friendly chat buddy who speaks in {currentProfile.accent} accent
                           </p>
                         </div>
                       </div>

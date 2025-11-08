@@ -12,12 +12,31 @@ from db import Database
 load_dotenv()
 
 # Configure logging - ensure INFO level and format
+# Set DEBUG level for routes.chat to see detailed conversation logs
+import sys
+from pathlib import Path
+
+# Create logs directory if it doesn't exist
+log_dir = Path(__file__).parent / "logs"
+log_dir.mkdir(exist_ok=True)
+
+# Log file path
+log_file = log_dir / "backend.log"
+
+# Configure logging with both file and console handlers
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.FileHandler(log_file, encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
+# Enable DEBUG logging for chat routes to see full prompts and responses
+logging.getLogger('routes.chat').setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
+logger.info(f"Logging to file: {log_file}")
 
 
 @asynccontextmanager
@@ -58,6 +77,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:3001",  # In case frontend runs on different port
+        "http://127.0.0.1:3001",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],

@@ -14,6 +14,7 @@ const LiveChat = () => {
   const [audioCapture, setAudioCapture] = useState(null);
   const [isListening, setIsListening] = useState(false);
   const [isRestored, setIsRestored] = useState(false); // Track if conversation was restored
+  const [micError, setMicError] = useState(null); // Track microphone initialization errors
   const [isAISpeaking, setIsAISpeaking] = useState(false);
   const [currentAudioBlob, setCurrentAudioBlob] = useState(null);
   const [currentAIMessage, setCurrentAIMessage] = useState('');
@@ -23,9 +24,13 @@ const LiveChat = () => {
   const messagesEndRef = useRef(null);
   const conversationHistory = useRef([]);
   const currentAudioRef = useRef(null); // Track current audio playback
-  const isMountedRef = useRef(true); // Track if component is mounted
+  const isMountedRef = useRef(true); // Track if component is mounted - start as true, set to false on unmount
   const hasPlayedInitialGreeting = useRef(false); // Track if initial greeting was played
   const pendingAudioRef = useRef(null); // Ref to track pending audio element
+  const allAudioRefs = useRef([]); // Track all audio instances to stop them
+  const isPlayingRef = useRef(false); // Guard to prevent multiple simultaneous playbacks
+  const initAudioRef = useRef(false); // Track if audio capture has been initialized
+  const replayingMessageIdRef = useRef(null); // Track which message is currently being replayed
 
   // Get storage key for this conversation
   const getStorageKey = () => {
@@ -53,33 +58,101 @@ const LiveChat = () => {
     return null;
   };
 
-  // Replay audio for a specific message
-  const replayMessageAudio = async (messageId) => {
-    let audioBlob = messageAudioMap.get(messageId);
-    
-    // If audio not in map, regenerate it from the message text
-    if (!audioBlob) {
-      const message = messages.find(m => m.id === messageId);
-      if (message && message.type === 'ai') {
-        try {
-          const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
-          audioBlob = await ttsService.generateSpeech(message.text, null, accentName, true); // robotic=true for Wally
-          
-          // Store it for future replays
-          if (audioBlob) {
-            const newMap = new Map(messageAudioMap);
-            newMap.set(messageId, audioBlob);
-            setMessageAudioMap(newMap);
-          }
-        } catch (error) {
-          console.error('Error generating replay audio:', error);
-          return;
+  // Stop all currently playing audio
+  const stopAllAudio = () => {
+    // Stop main audio ref
+    if (currentAudioRef.current) {
+      try {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+        if (currentAudioRef.current.src) {
+          URL.revokeObjectURL(currentAudioRef.current.src);
         }
+        currentAudioRef.current.src = '';
+        currentAudioRef.current = null;
+      } catch (e) {
+        console.error('Error stopping currentAudioRef:', e);
       }
     }
     
-    if (audioBlob) {
-      await playAIResponseAudio(audioBlob);
+    // Stop all audio instances
+    allAudioRefs.current.forEach(audio => {
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+        if (audio.src && audio.src.startsWith('blob:')) {
+          URL.revokeObjectURL(audio.src);
+        }
+        audio.src = '';
+      } catch (e) {
+        console.error('Error stopping audio instance:', e);
+      }
+    });
+    allAudioRefs.current = [];
+    
+    setIsAISpeaking(false);
+    setCurrentAudioBlob(null);
+    setPendingAudio(null);
+    pendingAudioRef.current = null;
+    isPlayingRef.current = false;
+  };
+
+  // Replay audio for a specific message
+  const replayMessageAudio = async (messageId) => {
+    // Guard: prevent multiple simultaneous replays of the same message
+    if (replayingMessageIdRef.current === messageId) {
+      console.log('Already replaying this message, skipping duplicate request');
+      return;
+    }
+    
+    // Guard: prevent replay if audio is already playing
+    if (isPlayingRef.current) {
+      console.log('Audio already playing, skipping replay request');
+      return;
+    }
+    
+    // Mark this message as being replayed
+    replayingMessageIdRef.current = messageId;
+    
+    try {
+      // Stop any currently playing audio first
+      stopAllAudio();
+      
+      let audioBlob = messageAudioMap.get(messageId);
+      
+      // If audio not in map, regenerate it from the message text
+      if (!audioBlob) {
+        const message = messages.find(m => m.id === messageId);
+        if (message && message.type === 'ai') {
+          try {
+            const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+            audioBlob = await ttsService.generateSpeech(message.text, null, accentName, true); // robotic=true for Wally
+            
+            // Store it for future replays
+            if (audioBlob) {
+              const newMap = new Map(messageAudioMap);
+              newMap.set(messageId, audioBlob);
+              setMessageAudioMap(newMap);
+            }
+          } catch (error) {
+            console.error('Error generating replay audio:', error);
+            replayingMessageIdRef.current = null; // Clear on error
+            return;
+          }
+        }
+      }
+      
+      if (audioBlob) {
+        await playAIResponseAudio(audioBlob);
+      }
+    } catch (error) {
+      console.error('Error replaying message audio:', error);
+      replayingMessageIdRef.current = null; // Clear on error
+    } finally {
+      // Clear the replaying flag after a short delay to allow audio to start
+      setTimeout(() => {
+        replayingMessageIdRef.current = null;
+      }, 100);
     }
   };
 
@@ -109,12 +182,61 @@ const LiveChat = () => {
     }
   };
 
+  // Initialize audio capture function (defined outside useEffect so it can be called from retry button)
+  const initAudio = async () => {
+    // Prevent multiple initializations
+    if (initAudioRef.current) {
+      console.log('Audio capture already initialized, skipping...');
+      return;
+    }
+    
+    try {
+      console.log('Initializing audio capture...');
+      initAudioRef.current = true; // Mark as initializing
+      
+      // Check if getUserMedia is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('getUserMedia is not supported in this browser');
+      }
+      
+      const capture = new AudioCapture();
+      await capture.initialize();
+      console.log('Audio capture initialized successfully');
+      setAudioCapture(capture);
+      setMicError(null); // Clear any previous errors
+    } catch (error) {
+      console.error('Error initializing audio capture:', error);
+      initAudioRef.current = false; // Reset on error so user can retry
+      let errorMessage = 'Microphone access required. ';
+      
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        errorMessage += 'Please allow microphone access in your browser settings.';
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        errorMessage += 'No microphone found. Please connect a microphone.';
+      } else if (error.name === 'NotSupportedError' || error.name === 'ConstraintNotSatisfiedError') {
+        errorMessage += 'Your browser does not support the required audio settings.';
+      } else {
+        errorMessage += `Error: ${error.message || 'Unknown error'}`;
+      }
+      
+      setMicError(errorMessage);
+    }
+  };
+
   // Save conversation whenever messages change
   useEffect(() => {
     if (messages.length > 0) {
       saveConversation(messages);
     }
   }, [messages]);
+
+  // Set mounted flag on mount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!profile) {
@@ -138,30 +260,24 @@ const LiveChat = () => {
       if (lastAIMessage) {
         setCurrentAIMessage(lastAIMessage.text);
         
-        // Regenerate and play audio for the last AI message when page loads
-        if (!hasPlayedInitialGreeting.current) {
-          hasPlayedInitialGreeting.current = true;
-          // Regenerate audio for the last message using TTS directly
-          const regenerateMessageAudio = async () => {
-            try {
-              // Use TTS service to regenerate audio for the exact message text
-              const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
-              const audioBlob = await ttsService.generateSpeech(lastAIMessage.text, null, accentName, true); // robotic=true for Wally
-              
-              if (audioBlob) {
-                const newMap = new Map(messageAudioMap);
-                newMap.set(lastAIMessage.id, audioBlob);
-                setMessageAudioMap(newMap);
-                if (isMountedRef.current) {
-                  await playAIResponseAudio(audioBlob);
-                }
-              }
-            } catch (error) {
-              console.error('Error regenerating message audio:', error);
+        // Regenerate audio for the last message (but don't auto-play - user can click replay)
+        const regenerateMessageAudio = async () => {
+          try {
+            // Use TTS service to regenerate audio for the exact message text
+            const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+            const audioBlob = await ttsService.generateSpeech(lastAIMessage.text, null, accentName, true); // robotic=true for Wally
+            
+            if (audioBlob) {
+              const newMap = new Map(messageAudioMap);
+              newMap.set(lastAIMessage.id, audioBlob);
+              setMessageAudioMap(newMap);
+              // Don't auto-play restored conversations - user can click replay if they want
             }
-          };
-          regenerateMessageAudio();
-        }
+          } catch (error) {
+            console.error('Error regenerating message audio:', error);
+          }
+        };
+        regenerateMessageAudio();
       }
     } else {
       // Start new conversation - simple greeting that plays automatically
@@ -179,9 +295,21 @@ const LiveChat = () => {
       ];
       setCurrentAIMessage(greetingText);
       
-      // Generate and play TTS immediately (same as practice mode)
+      // Generate and play TTS immediately (same as practice mode) - but only once
       const playGreeting = async () => {
+        // Guard: only play if we haven't played the initial greeting yet
+        if (hasPlayedInitialGreeting.current) {
+          console.log('Initial greeting already played, skipping...');
+          return;
+        }
+        
         try {
+          // Mark as played BEFORE async operations to prevent race conditions
+          hasPlayedInitialGreeting.current = true;
+          
+          // Stop any existing audio first
+          stopAllAudio();
+          
           const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
           const audioBlob = await ttsService.generateSpeech(greetingText, null, accentName, true); // robotic=true for Wally
           
@@ -191,51 +319,27 @@ const LiveChat = () => {
             newMap.set(initialMessageId, audioBlob);
             setMessageAudioMap(newMap);
             
-            // Play audio immediately (exact same code as practice mode)
-            const audioUrl = URL.createObjectURL(audioBlob);
-            const audio = new Audio(audioUrl);
-            
-            audio.onended = () => {
-              setIsAISpeaking(false);
-              URL.revokeObjectURL(audioUrl);
-            };
-            
-            audio.onerror = (error) => {
-              console.error('Error playing greeting audio:', error);
-              setIsAISpeaking(false);
-              URL.revokeObjectURL(audioUrl);
-            };
-            
-            setIsAISpeaking(true);
-            await audio.play();
+            // Use centralized audio playback
+            await playAIResponseAudio(audioBlob);
           }
         } catch (error) {
           console.error('Error generating/playing greeting TTS:', error);
+          // Reset flag on error so user can try again
+          hasPlayedInitialGreeting.current = false;
         }
       };
       
       playGreeting();
     }
 
-    // Initialize audio capture
-    const initAudio = async () => {
-      try {
-        const capture = new AudioCapture();
-        await capture.initialize();
-        setAudioCapture(capture);
-      } catch (error) {
-        alert('Microphone access required. Please allow microphone access and refresh.');
-      }
-    };
-
+    // Initialize audio capture on mount
     initAudio();
 
     return () => {
       // Save conversation before unmounting
       saveConversation();
       
-      // Cleanup on unmount
-      isMountedRef.current = false;
+      // Cleanup on unmount (isMountedRef is already handled by the dedicated useEffect)
       if (audioCapture) {
         audioCapture.cleanup();
       }
@@ -260,7 +364,17 @@ const LiveChat = () => {
   };
 
   const startListening = () => {
-    if (!audioCapture || isRecording) return;
+    if (!audioCapture) {
+      console.error('Audio capture not initialized');
+      alert('Microphone not initialized. Please refresh the page and try again.');
+      return;
+    }
+    
+    if (isRecording) {
+      console.warn('Already recording, ignoring duplicate start request');
+      return;
+    }
+    
     try {
       // Start recording with volume callback
       audioCapture.startRecording((volume) => {
@@ -270,7 +384,24 @@ const LiveChat = () => {
       setIsListening(true);
     } catch (error) {
       console.error('Error starting recording:', error);
-      alert('Error starting recording. Please try again.');
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+      
+      let errorMessage = 'Error starting recording. ';
+      if (error.message && error.message.includes('not initialized')) {
+        errorMessage = 'Microphone not initialized. Please refresh the page and try again.';
+      } else if (error.message) {
+        errorMessage += error.message;
+      } else {
+        errorMessage += 'Please try again.';
+      }
+      
+      alert(errorMessage);
+      setIsRecording(false);
+      setIsListening(false);
     }
   };
 
@@ -285,22 +416,63 @@ const LiveChat = () => {
     try {
       const audioBlob = await audioCapture.stopRecording();
       
-      // Transcribe audio using Whisper
-      const formData = new FormData();
-      formData.append('audio_file', audioBlob, 'recording.wav');
-      formData.append('user_id', JSON.parse(localStorage.getItem('user')).user_id);
-      formData.append('session_id', `chat_${Date.now()}`);
-      formData.append('language', profile.language);
-      formData.append('target_accent', profile.accent);
-
-      // Analyze pronunciation (includes Whisper transcription)
-      const analysisResult = await analysisService.analyzeAccent(formData);
+      // Use new endpoint: Whisper transcription -> Gemini feedback & response
+      const user = JSON.parse(localStorage.getItem('user'));
       
-      // Get transcription from Whisper
-      const userText = analysisResult.transcribed_text || 
-                       analysisResult.transcription || 
-                       analysisResult.text ||
-                       'I said something...';
+      // Prepare conversation history for API
+      const historyForAPI = conversationHistory.current.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+      
+      // Add timeout to prevent hanging - 60 seconds max
+      const requestStartTime = Date.now();
+      console.log('🔄 [FRONTEND] Starting chat request...', {
+        audioBlobSize: audioBlob.size,
+        historyLength: historyForAPI.length,
+        timestamp: new Date().toISOString()
+      });
+      
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
+          const elapsed = (Date.now() - requestStartTime) / 1000;
+          console.error(`❌ [FRONTEND] Request timeout after ${elapsed.toFixed(2)}s`);
+          reject(new Error('Request timeout: The server took too long to respond. Please try again.'));
+        }, 60000); // 60 second timeout
+      });
+      
+      // Call the new endpoint that handles Whisper + Gemini with timeout
+      const chatResponse = await Promise.race([
+        (async () => {
+          try {
+            console.log('🔄 [FRONTEND] Calling sendMessageWithAudioUpload...');
+            const response = await chatService.sendMessageWithAudioUpload(
+              audioBlob,
+              {
+                user_id: user.user_id,
+                language: profile.language,
+                target_accent: profile.accent,
+              },
+              historyForAPI
+            );
+            const elapsed = (Date.now() - requestStartTime) / 1000;
+            console.log(`✅ [FRONTEND] Request completed in ${elapsed.toFixed(2)}s`, {
+              hasAudio: !!response.audio,
+              audioSize: response.audio?.size || 0,
+              messageLength: response.message?.length || 0
+            });
+            return response;
+          } catch (error) {
+            const elapsed = (Date.now() - requestStartTime) / 1000;
+            console.error(`❌ [FRONTEND] Request failed after ${elapsed.toFixed(2)}s:`, error);
+            throw error;
+          }
+        })(),
+        timeoutPromise
+      ]);
+      
+      // Get transcribed text
+      const userText = chatResponse.transcribed_text || 'I said something...';
       
       // Add user message
       const userMessage = {
@@ -308,22 +480,84 @@ const LiveChat = () => {
         type: 'user',
         text: userText,
         timestamp: new Date(),
-        pronunciationScore: analysisResult.accent_score || analysisResult.score || null,
+        pronunciationScore: chatResponse.pronunciation_score || null,
       };
       setMessages(prev => [...prev, userMessage]);
       conversationHistory.current.push({ role: 'user', content: userText });
 
-      // Generate AI response with feedback using backend API
-      await generateAIResponse(userText, {
-        ...analysisResult,
-        accent_score: analysisResult.accent_score || analysisResult.score || 70,
-        struggle_areas: analysisResult.struggle_areas || analysisResult.struggleAreas || [],
-      });
+      // Add AI message and play audio
+      const aiMessageId = Date.now() + 1;
+      const aiMessage = {
+        id: aiMessageId,
+        type: 'ai',
+        text: chatResponse.message,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, aiMessage]);
+      conversationHistory.current.push({ role: 'assistant', content: chatResponse.message });
+      setCurrentAIMessage(chatResponse.message);
+
+      // Store audio for replay and play it
+      let audioToPlay = chatResponse.audio;
+      
+      if (audioToPlay && audioToPlay.size > 0) {
+        console.log('Playing AI response audio...', {
+          blobSize: audioToPlay.size,
+          blobType: audioToPlay.type
+        });
+        // Store audio for replay
+        const newMap = new Map(messageAudioMap);
+        newMap.set(aiMessageId, audioToPlay);
+        setMessageAudioMap(newMap);
+        
+        // Stop any currently playing audio first and wait for cleanup
+        stopAllAudio();
+        await new Promise(resolve => setTimeout(resolve, 100)); // Ensure cleanup completes
+        await playAIResponseAudio(audioToPlay);
+      } else {
+        console.warn('No valid audio received from backend, generating TTS fallback...');
+        // Fallback: generate TTS
+        try {
+          const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+          audioToPlay = await ttsService.generateSpeech(chatResponse.message, null, accentName, true);
+          if (audioToPlay && audioToPlay.size > 0) {
+            const newMap = new Map(messageAudioMap);
+            newMap.set(aiMessageId, audioToPlay);
+            setMessageAudioMap(newMap);
+            stopAllAudio();
+            await playAIResponseAudio(audioToPlay);
+          }
+        } catch (ttsError) {
+          console.error('Error generating TTS fallback:', ttsError);
+        }
+      }
 
     } catch (error) {
       console.error('Error processing audio:', error);
-      alert('Error processing your message. Please try again.');
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        stack: error.stack
+      });
+      
+      let errorMessage = 'Error processing your message. ';
+      if (error.message && error.message.includes('timeout')) {
+        // Timeout error
+        errorMessage = 'Request timeout: The server took too long to respond. Please check your connection and try again.';
+      } else if (error.response) {
+        // Backend returned an error
+        errorMessage += `Server error: ${error.response.status} - ${error.response.data?.detail || error.response.data?.message || 'Unknown error'}`;
+      } else if (error.message) {
+        // Network or other error
+        errorMessage += error.message;
+      } else {
+        errorMessage += 'Please try again.';
+      }
+      
+      alert(errorMessage);
     } finally {
+      // Always clear processing state, even if there was an error or timeout
       setIsProcessing(false);
     }
   };
@@ -399,34 +633,16 @@ const LiveChat = () => {
         setMessageAudioMap(newMap);
       }
 
-      // Play AI response audio (simple approach like practice mode)
+      // Play AI response audio using centralized function
       if (audioToPlay && audioToPlay.size > 0) {
         console.log('Playing AI response audio...', {
           blobSize: audioToPlay.size,
           blobType: audioToPlay.type
         });
-        try {
-          // Simple playback (same as practice mode)
-          const audioUrl = URL.createObjectURL(audioToPlay);
-          const audio = new Audio(audioUrl);
-          
-          audio.onended = () => {
-            setIsAISpeaking(false);
-            URL.revokeObjectURL(audioUrl);
-          };
-          
-          audio.onerror = (error) => {
-            console.error('Error playing AI response audio:', error);
-            setIsAISpeaking(false);
-            URL.revokeObjectURL(audioUrl);
-          };
-          
-          setIsAISpeaking(true);
-          await audio.play();
-        } catch (playError) {
-          console.error('Error playing AI response audio:', playError);
-          setIsAISpeaking(false);
-        }
+        // Stop any currently playing audio first and wait for cleanup
+        stopAllAudio();
+        await new Promise(resolve => setTimeout(resolve, 100)); // Ensure cleanup completes
+        await playAIResponseAudio(audioToPlay);
       } else {
         console.error('No valid audio to play for AI message');
       }
@@ -445,8 +661,11 @@ const LiveChat = () => {
       conversationHistory.current.push({ role: 'assistant', content: fallbackMessage.text });
       setCurrentAIMessage(fallbackMessage.text);
       
-      // Generate and play TTS for fallback message (simple approach) - with robotic voice
+      // Generate and play TTS for fallback message - with robotic voice
       try {
+        // Stop any currently playing audio first
+        stopAllAudio();
+        
         const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
         const audioBlob = await ttsService.generateSpeech(fallbackMessage.text, null, accentName, true); // robotic=true
         if (audioBlob) {
@@ -454,23 +673,8 @@ const LiveChat = () => {
           newMap.set(fallbackMessageId, audioBlob);
           setMessageAudioMap(newMap);
           
-          // Simple playback
-          const audioUrl = URL.createObjectURL(audioBlob);
-          const audio = new Audio(audioUrl);
-          
-          audio.onended = () => {
-            setIsAISpeaking(false);
-            URL.revokeObjectURL(audioUrl);
-          };
-          
-          audio.onerror = (error) => {
-            console.error('Error playing fallback audio:', error);
-            setIsAISpeaking(false);
-            URL.revokeObjectURL(audioUrl);
-          };
-          
-          setIsAISpeaking(true);
-          await audio.play();
+          // Use centralized audio playback
+          await playAIResponseAudio(audioBlob);
         }
       } catch (ttsError) {
         console.error('Error generating TTS for fallback message:', ttsError);
@@ -479,9 +683,8 @@ const LiveChat = () => {
   };
 
   const playAIResponseAudio = async (audioBlob) => {
-    // Only play audio if component is still mounted
     if (!isMountedRef.current) {
-      console.log('Component not mounted, skipping audio playback');
+      console.warn('Component not mounted, skipping audio playback');
       return;
     }
     
@@ -490,37 +693,29 @@ const LiveChat = () => {
       return;
     }
     
-    // Validate blob
     if (audioBlob.size === 0) {
       console.error('Audio blob is empty (size: 0)');
       return;
     }
     
+    // Guard against multiple simultaneous playbacks
+    if (isPlayingRef.current) {
+      console.warn('Audio already playing, skipping new playback request');
+      return;
+    }
+    
+    isPlayingRef.current = true;
+    stopAllAudio();
+    
     try {
-      console.log('Starting audio playback...', { 
-        blobSize: audioBlob.size, 
-        blobType: audioBlob.type,
-        isValid: audioBlob instanceof Blob
-      });
-      
-      // Stop any currently playing audio
-      if (currentAudioRef.current) {
-        currentAudioRef.current.pause();
-        currentAudioRef.current.src = '';
-        currentAudioRef.current = null;
-      }
-      
-      // Set audio blob for reactive avatar FIRST so avatar can react
       setCurrentAudioBlob(audioBlob);
       setIsAISpeaking(true);
       
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
       
-      // Set volume to ensure it's audible
       audio.volume = 1.0;
       
-      // Set up event handlers BEFORE trying to play
       audio.onloadeddata = () => {
         console.log('Audio data loaded, ready to play');
       };
@@ -536,6 +731,9 @@ const LiveChat = () => {
         setCurrentAudioBlob(null);
         setPendingAudio(null);
         pendingAudioRef.current = null;
+        isPlayingRef.current = false;
+        replayingMessageIdRef.current = null;
+        allAudioRefs.current = allAudioRefs.current.filter(a => a !== audio);
         if (currentAudioRef.current === audio) {
           currentAudioRef.current = null;
         }
@@ -546,12 +744,14 @@ const LiveChat = () => {
         URL.revokeObjectURL(audioUrl);
         setIsAISpeaking(false);
         setCurrentAudioBlob(null);
+        isPlayingRef.current = false;
+        replayingMessageIdRef.current = null;
+        allAudioRefs.current = allAudioRefs.current.filter(a => a !== audio);
         if (currentAudioRef.current === audio) {
           currentAudioRef.current = null;
         }
       };
       
-      // Pause handler - stop if component unmounts
       audio.onpause = () => {
         if (!isMountedRef.current && currentAudioRef.current === audio) {
           URL.revokeObjectURL(audioUrl);
@@ -560,6 +760,12 @@ const LiveChat = () => {
           currentAudioRef.current = null;
         }
       };
+      
+      if (allAudioRefs.current.includes(audio)) {
+        console.warn('Audio instance already in tracking array - this should not happen');
+      } else {
+        allAudioRefs.current.push(audio);
+      }
       
       currentAudioRef.current = audio;
       
@@ -629,6 +835,10 @@ const LiveChat = () => {
           src: audio.src.substring(0, 50) + '...',
           error: audio.error
         });
+        // Clear playing flag on play error (unless it's autoplay restriction)
+        if (playError.name !== 'NotAllowedError' && playError.name !== 'NotSupportedError') {
+          isPlayingRef.current = false;
+        }
         
         // If autoplay is blocked, set up interaction handler
         if (playError.name === 'NotAllowedError' || playError.name === 'NotSupportedError') {
@@ -728,7 +938,7 @@ const LiveChat = () => {
           const initialMessage = {
             id: initialMessageId,
             type: 'ai',
-            text: chatResponse.message || `Hi! I'm Wally. I'm here to help you practice your ${profile.accent} accent. What are you passionate about?`,
+            text: chatResponse.message || `Hey! I'm Wally. What's up? What are you into these days?`,
             timestamp: new Date(),
           };
           setMessages([initialMessage]); // Only one message
@@ -777,9 +987,7 @@ const LiveChat = () => {
       currentAudioRef.current = null;
     }
     
-    // Mark as unmounted
-    isMountedRef.current = false;
-    
+    // Cleanup (isMountedRef is handled by useEffect cleanup)
     if (audioCapture) {
       audioCapture.cleanup();
     }
@@ -919,44 +1127,51 @@ const LiveChat = () => {
             </div>
           )}
 
-            {/* Conversation History (Minimal) */}
-          {messages.length > 0 && (
-            <div className="w-full max-w-2xl mb-6">
-              <div className="bg-white/60 backdrop-blur-sm rounded-xl p-4 max-h-48 overflow-y-auto">
-                <div className="space-y-2">
-                  {messages.slice(-3).map((message) => (
-                    <div
-                      key={message.id}
-                      className={`text-sm flex items-start gap-2 ${
-                        message.type === 'user' ? 'text-right text-indigo-700 justify-end' : 'text-left text-gray-600'
-                      }`}
-                    >
-                      <div className="flex-1">
-                        {message.type === 'user' && (
-                          <span className="font-medium">You: </span>
+            {/* Conversation History (Minimal) - Exclude current message */}
+          {messages.length > 1 && (() => {
+            // Filter out the current message from history
+            const historyMessages = messages.filter(m => 
+              m.type !== 'ai' || m.text !== currentAIMessage
+            );
+            
+            return historyMessages.length > 0 ? (
+              <div className="w-full max-w-2xl mb-6">
+                <div className="bg-white/60 backdrop-blur-sm rounded-xl p-4 max-h-48 overflow-y-auto">
+                  <div className="space-y-2">
+                    {historyMessages.slice(-3).map((message) => (
+                      <div
+                        key={message.id}
+                        className={`text-sm flex items-start gap-2 ${
+                          message.type === 'user' ? 'text-right text-indigo-700 justify-end' : 'text-left text-gray-600'
+                        }`}
+                      >
+                        <div className="flex-1">
+                          {message.type === 'user' && (
+                            <span className="font-medium">You: </span>
+                          )}
+                          {message.type === 'ai' && (
+                            <span className="font-medium">Wally: </span>
+                          )}
+                          <span className="opacity-80">{message.text.substring(0, 100)}{message.text.length > 100 ? '...' : ''}</span>
+                        </div>
+                        {message.type === 'ai' && messageAudioMap.has(message.id) && (
+                          <button
+                            onClick={() => replayMessageAudio(message.id)}
+                            className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-indigo-100 hover:bg-indigo-200 text-indigo-600 transition-colors"
+                            title="Replay audio"
+                          >
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M8.445 14.832A1 1 0 0010 14v-2.798l5.445 3.63A1 1 0 0017 14V6a1 1 0 00-1.555-.832L10 8.798V6a1 1 0 00-1.555-.832l-6 4a1 1 0 000 1.664l6 4z" />
+                            </svg>
+                          </button>
                         )}
-                        {message.type === 'ai' && (
-                          <span className="font-medium">Wally: </span>
-                        )}
-                        <span className="opacity-80">{message.text.substring(0, 100)}{message.text.length > 100 ? '...' : ''}</span>
                       </div>
-                      {message.type === 'ai' && messageAudioMap.has(message.id) && (
-                        <button
-                          onClick={() => replayMessageAudio(message.id)}
-                          className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-indigo-100 hover:bg-indigo-200 text-indigo-600 transition-colors"
-                          title="Replay audio"
-                        >
-                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M8.445 14.832A1 1 0 0010 14v-2.798l5.445 3.63A1 1 0 0017 14V6a1 1 0 00-1.555-.832L10 8.798V6a1 1 0 00-1.555-.832l-6 4a1 1 0 000 1.664l6 4z" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            ) : null;
+          })()}
 
           {/* Processing Indicator */}
           {isProcessing && (
@@ -968,15 +1183,45 @@ const LiveChat = () => {
             </div>
           )}
 
+          {/* Microphone Error Message */}
+          {micError && (
+            <div className="w-full max-w-md mt-4 mb-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-sm text-red-800 font-medium mb-2">{micError}</p>
+                    <button
+                      onClick={() => {
+                        setMicError(null);
+                        initAudioRef.current = false; // Reset flag to allow retry
+                        initAudio();
+                      }}
+                      className="text-sm text-red-600 hover:text-red-800 underline"
+                    >
+                      Try Again
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Instructions */}
           <div className="w-full max-w-md mt-8">
             <p className="text-sm text-gray-600 text-center">
-              {isRecording
+              {micError
+                ? '⚠️ Microphone access is required to chat with Wally'
+                : isRecording
                 ? '🎤 Speak naturally - Wally is listening! Click Wally again when done.'
                 : isAISpeaking
                 ? '👂 Listen to Wally\'s response...'
                 : isProcessing
                 ? '⏳ Processing your message...'
+                : !audioCapture
+                ? '🎤 Initializing microphone...'
                 : '💬 Click Wally\'s face to start talking'}
             </p>
           </div>

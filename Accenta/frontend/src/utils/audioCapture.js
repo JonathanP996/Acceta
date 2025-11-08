@@ -19,21 +19,44 @@ class AudioCapture {
 
   async initialize() {
     try {
-      // Request microphone access
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 16000,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      // Check if getUserMedia is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('getUserMedia is not supported in this browser');
+      }
+      
+      console.log('Requesting microphone access...');
+      
+      // Request microphone access with fallback for browsers that don't support all constraints
+      let stream;
+      try {
+        // Try with full constraints first
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            sampleRate: 16000,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      } catch (constraintError) {
+        console.warn('Full constraints failed, trying with basic constraints:', constraintError);
+        // Fallback to basic audio constraints
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
+      }
+      
+      this.stream = stream;
+      console.log('Microphone access granted');
 
       // Create AudioContext for processing
-      this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000,
-      });
+      // Don't specify sampleRate - let it match the MediaStream's sample rate
+      // This prevents "different sample-rate" errors
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      
+      // Log the actual sample rate being used
+      console.log('AudioContext sample rate:', this.audioContext.sampleRate);
 
       // Create analyser for real-time volume monitoring
       this.analyser = this.audioContext.createAnalyser();
@@ -43,13 +66,28 @@ class AudioCapture {
       this.microphone.connect(this.analyser);
       this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
 
-      // Create MediaRecorder
-      const options = {
+      // Create MediaRecorder with fallback options
+      let options = {
         mimeType: 'audio/webm;codecs=opus',
         audioBitsPerSecond: 16000,
       };
+      
+      // Check if the mimeType is supported
+      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        console.warn('WebM Opus not supported, trying fallback formats...');
+        // Try other formats
+        if (MediaRecorder.isTypeSupported('audio/webm')) {
+          options.mimeType = 'audio/webm';
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          options.mimeType = 'audio/mp4';
+        } else {
+          // Use default
+          options = {};
+        }
+      }
 
       this.mediaRecorder = new MediaRecorder(this.stream, options);
+      console.log('MediaRecorder created with mimeType:', this.mediaRecorder.mimeType || 'default');
 
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -66,13 +104,34 @@ class AudioCapture {
 
   startRecording(volumeCallback = null) {
     if (!this.mediaRecorder) {
-      throw new Error('Audio capture not initialized');
+      throw new Error('Audio capture not initialized. MediaRecorder is null.');
+    }
+    
+    if (!this.stream) {
+      throw new Error('Audio stream not available. Please reinitialize audio capture.');
+    }
+    
+    if (this.isRecording) {
+      console.warn('Already recording, stopping previous recording first');
+      try {
+        this.mediaRecorder.stop();
+      } catch (e) {
+        // Ignore errors when stopping
+      }
     }
 
     this.chunks = [];
     this.isRecording = true;
     this.volumeCallback = volumeCallback;
-    this.mediaRecorder.start();
+    
+    try {
+      this.mediaRecorder.start();
+      console.log('Recording started successfully');
+    } catch (error) {
+      this.isRecording = false;
+      console.error('Error starting MediaRecorder:', error);
+      throw new Error(`Failed to start recording: ${error.message || 'Unknown error'}`);
+    }
     
     // Start volume monitoring if callback provided
     if (this.volumeCallback && this.analyser) {

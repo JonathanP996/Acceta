@@ -7,20 +7,29 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptDir
 
-Write-Host "🚀 Starting Accenta Backend..." -ForegroundColor Green
+Write-Host "Starting Accenta Backend..." -ForegroundColor Green
+Write-Host "Current directory: $(Get-Location)" -ForegroundColor Gray
 Write-Host ""
 
 # Check if venv exists
 $venvPath = Join-Path $scriptDir "venv"
+$requirementsPath = Join-Path $scriptDir "backend\requirements.txt"
+
+if (-not (Test-Path $requirementsPath)) {
+    Write-Host "ERROR: requirements.txt not found at: $requirementsPath" -ForegroundColor Red
+    Write-Host "Please ensure you're running this script from the Accenta directory." -ForegroundColor Yellow
+    exit 1
+}
+
 if (-not (Test-Path $venvPath)) {
-    Write-Host "❌ Virtual environment not found!" -ForegroundColor Red
+    Write-Host "Virtual environment not found!" -ForegroundColor Red
     Write-Host "Creating virtual environment..." -ForegroundColor Yellow
     python -m venv venv
     Write-Host "Installing dependencies..." -ForegroundColor Yellow
     & "$venvPath\Scripts\Activate.ps1"
-    pip install -r backend\requirements.txt
+    pip install -r "$requirementsPath"
 } else {
-    Write-Host "✓ Virtual environment found" -ForegroundColor Green
+    Write-Host "Virtual environment found" -ForegroundColor Green
     & "$venvPath\Scripts\Activate.ps1"
 }
 

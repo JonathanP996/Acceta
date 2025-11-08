@@ -16,6 +16,7 @@ export const API_ENDPOINTS = {
   // Chat
   CHAT_MESSAGE: `${API_BASE_URL}/api/chat/message`,
   CHAT_MESSAGE_AUDIO: `${API_BASE_URL}/api/chat/message/audio`,
+  CHAT_MESSAGE_AUDIO_UPLOAD: `${API_BASE_URL}/api/chat/message/audio/upload`,
   
   // WebSocket
   WS_PRACTICE: (sessionId) => `ws://localhost:8000/ws/practice/${sessionId}`,

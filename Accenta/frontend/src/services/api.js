@@ -169,6 +169,72 @@ export const chatService = {
       pronunciation_feedback: response.data.pronunciation_feedback,
     };
   },
+  
+  sendMessageWithAudioUpload: async (audioBlob, userData, conversationHistory) => {
+    // Create FormData for file upload
+    const formData = new FormData();
+    formData.append('audio_file', audioBlob, 'recording.wav');
+    formData.append('user_id', userData.user_id);
+    formData.append('session_id', `chat_${Date.now()}`);
+    formData.append('language', userData.language);
+    formData.append('target_accent', userData.target_accent);
+    
+    // Add conversation history as JSON string
+    if (conversationHistory && conversationHistory.length > 0) {
+      formData.append('conversation_history', JSON.stringify(conversationHistory));
+    }
+    
+    const response = await api.post(API_ENDPOINTS.CHAT_MESSAGE_AUDIO_UPLOAD, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 60000, // 60 second timeout to prevent hanging
+    });
+    
+    // Convert base64 audio to blob
+    let audioBlobResponse = null;
+    if (response.data.audio_base64) {
+      try {
+        const audioBase64 = response.data.audio_base64;
+        console.log('Received audio base64, length:', audioBase64.length);
+        
+        if (!audioBase64 || audioBase64.length === 0) {
+          console.warn('Empty audio_base64 string received');
+        } else {
+          try {
+            const audioBytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
+            audioBlobResponse = new Blob([audioBytes], { type: 'audio/mpeg' });
+            console.log('✅ Created audio blob:', { 
+              size: audioBlobResponse.size, 
+              type: audioBlobResponse.type
+            });
+            
+            if (audioBlobResponse.size === 0) {
+              console.error('❌ Created audio blob is empty!');
+              audioBlobResponse = null;
+            }
+          } catch (conversionError) {
+            console.error('❌ Error converting base64 to blob:', conversionError);
+            audioBlobResponse = null;
+          }
+        }
+      } catch (error) {
+        console.error('Error converting base64 to blob:', error);
+        audioBlobResponse = null;
+      }
+    } else {
+      console.warn('No audio_base64 in response. Response keys:', Object.keys(response.data || {}));
+    }
+    
+    return {
+      audio: audioBlobResponse,
+      message: response.data.ai_message,
+      transcribed_text: response.data.transcribed_text,
+      pronunciation_score: response.data.pronunciation_score,
+      pronunciation_feedback: response.data.pronunciation_feedback,
+      struggle_areas: response.data.struggle_areas || [],
+    };
+  },
 };
 
 export default api;

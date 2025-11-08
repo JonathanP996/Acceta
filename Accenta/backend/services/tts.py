@@ -81,8 +81,8 @@ async def text_to_speech(
             "model_id": model_id,
             "voice_settings": {
                 # Robotic voice settings: lower stability = more robotic, lower similarity = less natural
-                "stability": 0.15 if robotic else 0.5,  # Lower = more robotic/variable
-                "similarity_boost": 0.2 if robotic else 0.75,  # Lower = less natural, more robotic
+                "stability": 0.1 if robotic else 0.5,  # Lower = more robotic/variable (0.1 = very robotic)
+                "similarity_boost": 0.1 if robotic else 0.75,  # Lower = less natural, more robotic (0.1 = very robotic)
                 "style": 0.0,  # Neutral style
                 "use_speaker_boost": False if robotic else True
             }
@@ -119,6 +119,8 @@ def _get_voice_for_accent(accent: str, robotic: bool = False) -> str:
     if robotic:
         # Use a deeper voice ID that sounds more robotic
         # "pNInz6obpgDQGcFmaJgB" (Adam) tends to sound more robotic with low stability
+        # Alternative robotic voices: "EXAVITQu4vr4xnSDxMaL" (Bella - can sound robotic with low settings)
+        # Using Adam with very low stability/similarity for maximum robotic effect
         return "pNInz6obpgDQGcFmaJgB"
     
     # Map common accent names to voice IDs
