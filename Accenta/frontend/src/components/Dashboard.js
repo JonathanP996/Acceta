@@ -276,6 +276,31 @@ const Dashboard = () => {
               </div>
             </div>
 
+            {/* Initial Assessment Button */}
+            <div className="mb-8">
+              <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-purple-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900 mb-2">Initial Assessment</h3>
+                    <p className="text-gray-600 text-sm">
+                      {localStorage.getItem('hasCompletedInitialTest') 
+                        ? 'Retake the comprehensive pronunciation test to update your baseline and track your progress'
+                        : 'Take a comprehensive pronunciation test to establish your baseline and unlock personalized practice tracks'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => navigate('/language-selection')}
+                    className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-500 text-white rounded-lg font-semibold hover:from-purple-700 hover:to-pink-600 transition-colors shadow-lg flex items-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {localStorage.getItem('hasCompletedInitialTest') ? 'Retake Assessment' : 'Take Assessment'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {/* Practice Tracks */}
             <div className="mb-8">
               <h3 className="text-2xl font-bold text-gray-900 mb-6">Practice Tracks</h3>

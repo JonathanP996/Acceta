@@ -141,15 +141,16 @@ async def health_check():
 
 
 # Import routes AFTER CORS middleware is configured
-from routes import analyze, auth, practice, tts, chat, onboarding
+from routes import analyze, analyze_multi, auth, practice, tts, chat, onboarding
 
 # Register routes
 app.include_router(analyze.router)
+app.include_router(analyze_multi.router)  # Multi-sentence analysis
 app.include_router(auth.router)
 app.include_router(practice.router)
 app.include_router(tts.router)
 app.include_router(chat.router)
-app.include_router(onboarding.router)  # NEW: Onboarding endpoint
+app.include_router(onboarding.router)  # Onboarding endpoint
 
 if __name__ == "__main__":
     import uvicorn
