@@ -7,7 +7,9 @@ import Login from './components/Auth/Login';
 import Signup from './components/Auth/Signup';
 
 // Main Components
+import Landing from './components/Landing';
 import LanguageSelection from './components/LanguageSelection';
+import PracticeLanguageSelection from './components/PracticeLanguageSelection';
 import AccentSelection from './components/AccentSelection';
 import InitialTest from './components/InitialTest';
 import Dashboard from './components/Dashboard';
@@ -29,6 +31,7 @@ function App() {
     <Router>
       <Routes>
         {/* Public Routes */}
+        <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
 
@@ -74,6 +77,14 @@ function App() {
           }
         />
         <Route
+          path="/practice-language-selection"
+          element={
+            <ProtectedRoute>
+              <PracticeLanguageSelection />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/practice"
           element={
             <ProtectedRoute>
@@ -98,14 +109,14 @@ function App() {
           }
         />
 
-        {/* Default Route */}
+        {/* Default Route - redirect authenticated users to dashboard */}
         <Route
-          path="/"
+          path="/home"
           element={
             authService.isAuthenticated() ? (
               <Navigate to="/dashboard" replace />
             ) : (
-              <Navigate to="/login" replace />
+              <Navigate to="/" replace />
             )
           }
         />

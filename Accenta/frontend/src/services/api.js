@@ -97,6 +97,15 @@ export const analysisService = {
     });
     return response.data;
   },
+  
+  analyzeAccentMulti: async (formData) => {
+    const response = await api.post(API_ENDPOINTS.ANALYZE_ACCENT_MULTI, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
 };
 
 // TTS services

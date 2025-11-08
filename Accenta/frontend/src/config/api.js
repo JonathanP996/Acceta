@@ -12,6 +12,7 @@ export const API_ENDPOINTS = {
   
   // Analysis
   ANALYZE_ACCENT: `${API_BASE_URL}/api/analyze_accent`,
+  ANALYZE_ACCENT_MULTI: `${API_BASE_URL}/api/analyze_accent_multi`,
   
   // Chat
   CHAT_MESSAGE: `${API_BASE_URL}/api/chat/message`,
