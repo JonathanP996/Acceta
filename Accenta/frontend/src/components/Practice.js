@@ -3,7 +3,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
 import WaveformVisualization from './WaveformVisualization';
 import { ttsService } from '../services/api';
+import { getPracticePhrases } from '../data/languagePrompts';
 
+// Default practice phrases (fallback)
 export const PRACTICE_PHRASES = [
   "Hello, how are you today?",
   "I would like a cup of coffee",
@@ -32,7 +34,12 @@ const Practice = ({ profile: propProfile, customPhrases, isCurated }) => {
   const navigate = useNavigate();
   const { profile: locationProfile } = location.state || {};
   const profile = propProfile || locationProfile;
-  const phrases = customPhrases || PRACTICE_PHRASES;
+  
+  // Get language-specific practice phrases if no custom phrases provided
+  const defaultPhrases = profile?.language?.id 
+    ? getPracticePhrases(profile.language.id) 
+    : PRACTICE_PHRASES;
+  const phrases = customPhrases || defaultPhrases;
   const [currentPhrase, setCurrentPhrase] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);

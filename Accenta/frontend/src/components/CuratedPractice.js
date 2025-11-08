@@ -1,57 +1,53 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Practice from './Practice';
+import { getStruggleAreaPhrases, getPracticePhrases } from '../data/languagePrompts';
 
 const CuratedPractice = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, struggleAreas } = location.state || {};
 
-  // Generate curated phrases based on struggle areas
-  const generateCuratedPhrases = (areas) => {
-    const phraseMap = {
-      'r': [
-        "Red roses are really rare",
-        "Round the rugged rock",
-        "The rabbit ran rapidly",
-        "Rory's roller skates",
-        "Rare red roses",
-      ],
-      'th': [
-        "Think about this thoroughly",
-        "The thirty-three thieves",
-        "Three thick thistles",
-        "Through thick and thin",
-        "Thank you for thinking",
-      ],
-      'v': [
-        "Very valuable vases",
-        "Violet velvet vest",
-        "Vivian loves vegetables",
-        "Vast valleys and views",
-        "Victor's violin",
-      ],
-      'l': [
-        "Lily likes lovely lilies",
-        "Little Larry laughed",
-        "Loyal lions lie",
-        "Lazy lizards lounging",
-        "Loud laughter",
-      ],
-    };
-
+  // Generate curated phrases based on struggle areas and language
+  const generateCuratedPhrases = (areas, languageId) => {
     const curatedPhrases = [];
+    
+    // Get language-specific phrases for each struggle area
     areas.forEach(area => {
-      if (phraseMap[area.toLowerCase()]) {
-        curatedPhrases.push(...phraseMap[area.toLowerCase()]);
+      const phrases = getStruggleAreaPhrases(languageId || 'english', area);
+      if (phrases && phrases.length > 0) {
+        curatedPhrases.push(...phrases);
       }
     });
 
-    return curatedPhrases.length > 0 ? curatedPhrases : Practice.PRACTICE_PHRASES;
+    // If no language-specific phrases found, fall back to default practice phrases
+    return curatedPhrases.length > 0 ? curatedPhrases : getPracticePhrases(languageId || 'english');
   };
 
+  // Get language ID from profile (could be stored as object with id, or just string name)
+  let languageId = 'english'; // default fallback
+  if (profile?.language) {
+    if (typeof profile.language === 'object' && profile.language.id) {
+      languageId = profile.language.id;
+    } else if (typeof profile.language === 'string') {
+      // Try to map language name to id
+      const nameToId = {
+        'english': 'english',
+        'spanish': 'spanish',
+        'french': 'french',
+        'german': 'german',
+        'italian': 'italian',
+        'portuguese': 'portuguese',
+        'mandarin': 'mandarin',
+        'mandarin chinese': 'mandarin',
+        'japanese': 'japanese',
+      };
+      languageId = nameToId[profile.language.toLowerCase()] || 'english';
+    }
+  }
+  
   const [curatedPhrases] = useState(
-    generateCuratedPhrases(struggleAreas || profile?.struggleAreas || [])
+    generateCuratedPhrases(struggleAreas || profile?.struggleAreas || [], languageId)
   );
 
   if (!profile) {

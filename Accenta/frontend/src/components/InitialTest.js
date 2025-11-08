@@ -2,39 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
 import { analysisService, ttsService } from '../services/api';
-
-const TEST_PROMPTS = [
-  "The quick brown fox jumps over the lazy dog",
-  "She sells seashells by the seashore",
-  "How much wood would a woodchuck chuck",
-  "Peter Piper picked a peck of pickled peppers",
-  "Red lorry, yellow lorry",
-  "Unique New York",
-  "Irish wristwatch",
-  "Six thick thistle sticks",
-  "The thirty-three thieves thought that they thrilled the throne",
-  "I wish to wish the wish you wish to wish",
-  "A proper copper coffee pot",
-  "Betty Botter bought some butter",
-  "Fuzzy Wuzzy was a bear",
-  "Can you can a can as a canner can can a can?",
-  "I scream, you scream, we all scream for ice cream",
-  "How can a clam cram in a clean cream can?",
-  "Lesser leather never weathered wetter weather better",
-  "A big black bug bit a big black bear",
-  "The sixth sick sheik's sixth sheep's sick",
-  "Which witch is which?",
-  "Round the rugged rock the ragged rascal ran",
-  "Three free throws",
-  "Theophilus Thistle, the successful thistle-sifter",
-  "I thought a thought but the thought I thought wasn't the thought I thought",
-  "If two witches would watch two watches",
-  "A skunk sat on a stump and thunk the stump stunk",
-  "Toy boat, toy boat, toy boat",
-  "Red leather, yellow leather",
-  "The great Greek grape growers grow great Greek grapes",
-  "I slit the sheet, the sheet I slit",
-];
+import { getTestPrompts } from '../data/languagePrompts';
 
 const InitialTest = () => {
   const location = useLocation();
@@ -47,6 +15,9 @@ const InitialTest = () => {
   const [audioCapture, setAudioCapture] = useState(null);
   const [testResults, setTestResults] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // Get language-specific test prompts
+  const TEST_PROMPTS = language ? getTestPrompts(language.id) : getTestPrompts('english');
 
   useEffect(() => {
     if (!language || !accent) {
@@ -111,7 +82,17 @@ const InitialTest = () => {
       // Fallback to Web Speech API if TTS fails
       try {
         const utterance = new SpeechSynthesisUtterance(TEST_PROMPTS[currentPrompt]);
-        utterance.lang = language.id === 'english' ? 'en-US' : language.id;
+        const langCodeMap = {
+          'english': 'en-US',
+          'spanish': 'es-ES',
+          'french': 'fr-FR',
+          'german': 'de-DE',
+          'italian': 'it-IT',
+          'portuguese': 'pt-PT',
+          'mandarin': 'zh-CN',
+          'japanese': 'ja-JP',
+        };
+        utterance.lang = langCodeMap[language.id] || language.id;
         utterance.onend = () => setIsPlaying(false);
         speechSynthesis.speak(utterance);
       } catch (fallbackError) {

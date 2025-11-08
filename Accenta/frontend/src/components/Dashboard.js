@@ -20,7 +20,8 @@ const Dashboard = () => {
     // Check if we have a new test result from InitialTest
     if (location.state?.testComplete && location.state?.initialScore !== undefined) {
       const initialScore = Math.round(location.state.initialScore);
-      const language = location.state.language?.name || location.state.language || 'Unknown';
+      // Store the full language object (with id) for language-specific prompts
+      const language = location.state.language || { name: 'Unknown', id: 'english' };
       const accent = location.state.accent?.name || location.state.accent || 'Unknown';
       
       // Initialize skills with scores based on overall score (can be refined later)
@@ -30,7 +31,7 @@ const Dashboard = () => {
       }));
       
       const newProfile = {
-        language: language,
+        language: language, // Store full language object with id
         accent: accent,
         overallScore: initialScore,
         skillLevel: getSkillLevel(initialScore),
