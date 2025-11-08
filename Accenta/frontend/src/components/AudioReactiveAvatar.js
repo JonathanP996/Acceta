@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-const AudioReactiveAvatar = ({ audioBlob, isSpeaking, onAnimationComplete }) => {
+const AudioReactiveAvatar = ({ audioBlob, isSpeaking, volumeLevel = 0, onAnimationComplete }) => {
   const canvasRef = useRef(null);
   const animationFrameRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -21,13 +21,15 @@ const AudioReactiveAvatar = ({ audioBlob, isSpeaking, onAnimationComplete }) => 
     const centerX = width / 2;
     const centerY = height / 2;
     const baseRadius = 80;
-    const maxRadius = baseRadius + (level * 120); // React to audio
+    // Use volumeLevel if provided (for real-time recording), otherwise use level (for playback)
+    const effectiveLevel = volumeLevel > 0 ? volumeLevel : level;
+    const maxRadius = baseRadius + (effectiveLevel * 120); // React to audio
 
     // Create gradient
     const gradient = ctx.createRadialGradient(centerX, centerY, baseRadius, centerX, centerY, maxRadius);
-    gradient.addColorStop(0, `rgba(99, 102, 241, ${0.8 + level * 0.2})`); // Indigo
-    gradient.addColorStop(0.5, `rgba(139, 92, 246, ${0.6 + level * 0.3})`); // Purple
-    gradient.addColorStop(1, `rgba(236, 72, 153, ${0.3 + level * 0.2})`); // Pink
+    gradient.addColorStop(0, `rgba(99, 102, 241, ${0.8 + effectiveLevel * 0.2})`); // Indigo
+    gradient.addColorStop(0.5, `rgba(139, 92, 246, ${0.6 + effectiveLevel * 0.3})`); // Purple
+    gradient.addColorStop(1, `rgba(236, 72, 153, ${0.3 + effectiveLevel * 0.2})`); // Pink
 
     // Main pulsing circle (avatar representation)
     ctx.beginPath();
@@ -36,10 +38,10 @@ const AudioReactiveAvatar = ({ audioBlob, isSpeaking, onAnimationComplete }) => 
     ctx.fill();
 
     // Add ripple effects based on audio
-    const rippleCount = Math.floor(level * 5) + 1;
+    const rippleCount = Math.floor(effectiveLevel * 5) + 1;
     for (let i = 0; i < rippleCount; i++) {
       const rippleRadius = maxRadius + (i * 20);
-      const opacity = (1 - (i / rippleCount)) * (0.3 + level * 0.2);
+      const opacity = (1 - (i / rippleCount)) * (0.3 + effectiveLevel * 0.2);
       
       ctx.beginPath();
       ctx.arc(centerX, centerY, rippleRadius, 0, Math.PI * 2);
@@ -259,6 +261,31 @@ const AudioReactiveAvatar = ({ audioBlob, isSpeaking, onAnimationComplete }) => 
       }
     };
   }, [audioBlob, onAnimationComplete, winkProgress]);
+
+  // Real-time volume reaction during recording
+  useEffect(() => {
+    if (volumeLevel > 0 && canvasRef.current && !audioBlob) {
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width;
+      const height = canvas.height;
+      
+      const animate = () => {
+        if (volumeLevel > 0 && canvasRef.current) {
+          draw(ctx, width, height, 0, null, winkProgressRef.current);
+          animationFrameRef.current = requestAnimationFrame(animate);
+        }
+      };
+      
+      animate();
+      
+      return () => {
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
+      };
+    }
+  }, [volumeLevel, audioBlob]);
 
   return (
     <div className="flex flex-col items-center justify-center">

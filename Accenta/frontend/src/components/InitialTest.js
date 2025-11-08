@@ -140,13 +140,32 @@ const InitialTest = () => {
     try {
       const audioBlob = await audioCapture.stopRecording();
       
-      // Create form data for API
-      const formData = new FormData();
-      formData.append('audio_file', audioBlob, 'recording.wav');
-      formData.append('user_id', JSON.parse(localStorage.getItem('user')).user_id);
-      formData.append('session_id', `test_${Date.now()}`);
-      formData.append('language', language.name);
-      formData.append('target_accent', accent.name);
+          // Create form data for API
+          const formData = new FormData();
+          formData.append('audio_file', audioBlob, 'recording.wav');
+          formData.append('user_id', JSON.parse(localStorage.getItem('user')).user_id);
+          formData.append('session_id', `test_${Date.now()}`);
+          // Use language ID (ISO-639-1 code) instead of name for Whisper API
+          // Map language IDs to ISO-639-1 codes
+          const languageCodeMap = {
+            'english': 'en',
+            'spanish': 'es',
+            'french': 'fr',
+            'german': 'de',
+            'italian': 'it',
+            'portuguese': 'pt',
+            'chinese': 'zh',
+            'mandarin': 'zh',
+            'japanese': 'ja',
+            'korean': 'ko',
+            'russian': 'ru',
+            'arabic': 'ar',
+            'hindi': 'hi',
+          };
+          const languageCode = languageCodeMap[language.id] || language.id;
+          formData.append('language', languageCode);
+          formData.append('target_accent', accent.name);
+          formData.append('expected_text', TEST_PROMPTS[currentPrompt]); // Send the expected phrase
 
       // Analyze the recording
       const result = await analysisService.analyzeAccent(formData);
@@ -166,7 +185,9 @@ const InitialTest = () => {
       }
     } catch (error) {
       console.error('Error analyzing recording:', error);
-      alert('Error analyzing recording. Please try again.');
+      // Show user-friendly error message
+      const errorMessage = error.response?.data?.detail || error.message || 'Error analyzing recording. Please try again.';
+      alert(errorMessage);
     } finally {
       setIsProcessing(false);
     }
@@ -486,9 +507,171 @@ const InitialTest = () => {
             </div>
           )}
 
+          {/* Show feedback for current/last result */}
+          {testResults.length > 0 && testResults[testResults.length - 1]?.result && (
+            <div className="mt-8 p-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border-2 border-blue-200">
+              <h3 className="text-xl font-bold text-gray-900 mb-4">Your Results</h3>
+              
+              {/* Text Match Warning */}
+              {testResults[testResults.length - 1].result.text_match_warning && (
+                <div className="mb-4 p-4 bg-yellow-100 border-l-4 border-yellow-500 rounded">
+                  <p className="text-yellow-800 font-semibold">
+                    ⚠️ {testResults[testResults.length - 1].result.text_match_warning}
+                  </p>
+                  {testResults[testResults.length - 1].result.word_accuracy !== undefined && (
+                    <p className="text-sm text-yellow-700 mt-1">
+                      Word match: {testResults[testResults.length - 1].result.word_accuracy}%
+                    </p>
+                  )}
+                </div>
+              )}
+              
+              {/* Word Accuracy (if available and good) */}
+              {testResults[testResults.length - 1].result.word_accuracy !== undefined && !testResults[testResults.length - 1].result.text_match_warning && (
+                <div className="mb-4 p-3 bg-green-50 rounded">
+                  <p className="text-sm text-green-700">
+                    ✅ Word accuracy: {testResults[testResults.length - 1].result.word_accuracy}%
+                  </p>
+                </div>
+              )}
+              
+              {/* Scoring Breakdown (Detailed Analysis) */}
+              {testResults[testResults.length - 1].result.scoring_breakdown && (
+                <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <h4 className="text-sm font-semibold text-gray-900 mb-3">📊 Detailed Scoring Breakdown</h4>
+                  
+                  {/* Speaking Rate */}
+                  {testResults[testResults.length - 1].result.scoring_breakdown.speaking_rate && (
+                    <div className="mb-3 p-2 bg-white rounded">
+                      <p className="text-xs font-semibold text-gray-700 mb-1">Speaking Rate:</p>
+                      <p className="text-xs text-gray-600">
+                        {testResults[testResults.length - 1].result.scoring_breakdown.speaking_rate.words_per_second} words/sec • {' '}
+                        {testResults[testResults.length - 1].result.scoring_breakdown.speaking_rate.phonemes_per_second} phonemes/sec • {' '}
+                        {testResults[testResults.length - 1].result.scoring_breakdown.speaking_rate.total_duration}s duration
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Global Features */}
+                  {testResults[testResults.length - 1].result.scoring_breakdown.global_features && (
+                    <div className="mb-3 p-2 bg-white rounded">
+                      <p className="text-xs font-semibold text-gray-700 mb-1">Your Voice Features:</p>
+                      <div className="text-xs text-gray-600 space-y-1">
+                        {testResults[testResults.length - 1].result.scoring_breakdown.global_features.pitch_analysis && (
+                          <p>
+                            Pitch: {testResults[testResults.length - 1].result.scoring_breakdown.global_features.pitch_analysis.your_pitch_hz} Hz
+                            {' '}(Reference: {testResults[testResults.length - 1].result.scoring_breakdown.global_features.pitch_analysis.reference_range})
+                            {' '}• Match: {Math.round(testResults[testResults.length - 1].result.scoring_breakdown.global_features.pitch_analysis.match_probability * 100)}%
+                          </p>
+                        )}
+                        {testResults[testResults.length - 1].result.scoring_breakdown.global_features.intensity && (
+                          <p>
+                            Intensity: {testResults[testResults.length - 1].result.scoring_breakdown.global_features.intensity}
+                            {' '}(Normalized: {testResults[testResults.length - 1].result.scoring_breakdown.global_features.intensity_normalized})
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Summary */}
+                  {testResults[testResults.length - 1].result.scoring_breakdown.summary && (
+                    <div className="p-2 bg-blue-50 rounded">
+                      <p className="text-xs font-semibold text-blue-900 mb-1">Analysis Summary:</p>
+                      <p className="text-xs text-blue-700">
+                        Analyzed {testResults[testResults.length - 1].result.scoring_breakdown.summary.total_phonemes_analyzed} phonemes • {' '}
+                        Average deviation: {testResults[testResults.length - 1].result.scoring_breakdown.summary.average_deviation} • {' '}
+                        {testResults[testResults.length - 1].result.scoring_breakdown.summary.native_boost_applied ? '✅ Native speaker boost applied' : ''}
+                        {testResults[testResults.length - 1].result.scoring_breakdown.summary.user_baseline_used ? ' • ✅ Personalized baseline used' : ''}
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Expandable Details */}
+                  <details className="mt-2">
+                    <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-900">
+                      Show detailed per-phoneme analysis ({testResults[testResults.length - 1].result.scoring_breakdown.per_phoneme_details?.length || 0} phonemes)
+                    </summary>
+                    <div className="mt-2 max-h-60 overflow-y-auto space-y-2">
+                      {testResults[testResults.length - 1].result.scoring_breakdown.per_phoneme_details?.slice(0, 10).map((detail, idx) => (
+                        <div key={idx} className="p-2 bg-white rounded text-xs">
+                          <p className="font-semibold">{detail.phoneme}: {detail.final_score.accent_score}%</p>
+                          <p className="text-gray-600">
+                            Pitch: {detail.features.pitch_hz}Hz ({detail.probabilities.pitch_prob * 100}% match) • {' '}
+                            Duration: {detail.features.duration_seconds}s ({detail.probabilities.duration_prob * 100}% match) • {' '}
+                            Intensity: {detail.probabilities.intensity_prob * 100}% match
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+              )}
+              
+              {/* Accent Score */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-semibold text-gray-700">Accent Accuracy</span>
+                  <span className="text-2xl font-bold text-accenta-primary">
+                    {testResults[testResults.length - 1].result.accent_score?.toFixed(1) || 0}%
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-3">
+                  <div
+                    className="bg-accenta-primary h-3 rounded-full transition-all duration-500"
+                    style={{ width: `${testResults[testResults.length - 1].result.accent_score || 0}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Feedback Summary */}
+              {testResults[testResults.length - 1].result.feedback_summary && (
+                <div className="mb-4 p-4 bg-white rounded-lg">
+                  <p className="text-gray-800">{testResults[testResults.length - 1].result.feedback_summary}</p>
+                </div>
+              )}
+
+              {/* Strengths */}
+              {testResults[testResults.length - 1].result.strengths && testResults[testResults.length - 1].result.strengths.length > 0 && (
+                <div className="mb-4">
+                  <h4 className="text-sm font-semibold text-green-700 mb-2">✅ Strengths</h4>
+                  <ul className="list-disc list-inside space-y-1">
+                    {testResults[testResults.length - 1].result.strengths.map((strength, idx) => (
+                      <li key={idx} className="text-sm text-green-600">{strength}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Weaknesses */}
+              {testResults[testResults.length - 1].result.weaknesses && testResults[testResults.length - 1].result.weaknesses.length > 0 && (
+                <div className="mb-4">
+                  <h4 className="text-sm font-semibold text-orange-700 mb-2">⚠️ Areas to Improve</h4>
+                  <ul className="list-disc list-inside space-y-1">
+                    {testResults[testResults.length - 1].result.weaknesses.map((weakness, idx) => (
+                      <li key={idx} className="text-sm text-orange-600">{weakness}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Exercises */}
+              {testResults[testResults.length - 1].result.personalized_exercises && testResults[testResults.length - 1].result.personalized_exercises.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-semibold text-blue-700 mb-2">💡 Practice Tips</h4>
+                  <ul className="list-disc list-inside space-y-1">
+                    {testResults[testResults.length - 1].result.personalized_exercises.map((exercise, idx) => (
+                      <li key={idx} className="text-sm text-blue-600">{exercise}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Results Summary */}
           {testResults.length > 0 && (
-            <div className="mt-8 p-4 bg-gray-50 rounded-lg">
+            <div className="mt-4 p-4 bg-gray-50 rounded-lg">
               <h3 className="font-semibold text-gray-900 mb-2">Progress</h3>
               <p className="text-sm text-gray-600">
                 Completed: {testResults.length} prompts

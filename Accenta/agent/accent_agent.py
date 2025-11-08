@@ -49,7 +49,7 @@ def before_model_callback(
 ):
     """
     Process pronunciation data before sending to LLM
-    Extracts phoneme deviations and builds comprehensive prompt
+    Builds comprehensive multi-signal prompt with all acoustic features, phoneme data, and history
     """
     state = callback_context.state
     
@@ -70,11 +70,83 @@ def before_model_callback(
             state["acoustic_features"] = payload.get("acoustic_features", {})
             state["user_history"] = payload.get("user_history", {})
             state["transcribed_text"] = payload.get("transcribed_text", "")
+            state["expected_text"] = payload.get("expected_text", "")
             state["target_accent"] = payload.get("target_accent", "American")
-            logger.info("Parsed pronunciation data from payload")
+            state["language"] = payload.get("language", "en")
+            state["speaking_rate"] = payload.get("speaking_rate", {})
+            state["scoring_breakdown"] = payload.get("scoring_breakdown", {})
+            state["accent_classification"] = payload.get("accent_classification", {})  # NEW: ML classifier results
+            
+            # Build enhanced prompt with multi-signal analysis
+            target_accent_lower = state["target_accent"].lower()
+            accent_rules = ACCENT_RULES.get(target_accent_lower, ACCENT_RULES.get("american", {}))
+            
+            # Extract key acoustic features for reasoning
+            acoustic_features = state["acoustic_features"]
+            pitch_contour = acoustic_features.get("pitch_contour", [])
+            formants = acoustic_features.get("formant_ratios", [])
+            mfcc_mean = acoustic_features.get("mfcc_mean", [])
+            intensity = acoustic_features.get("intensity", 0.5)
+            per_phoneme_features = acoustic_features.get("per_phoneme_features", [])
+            
+            # Build comprehensive analysis prompt
+            enhanced_prompt = f"""
+**MULTI-SIGNAL ACCENT ANALYSIS REQUEST**
+
+**1. WHISPER TRANSCRIPTION (Speech-to-Text):**
+- Transcribed text: "{state['transcribed_text']}"
+- Expected text: "{state.get('expected_text', 'N/A')}"
+- Language detected: {state['language']}
+- Word accuracy: {payload.get('word_accuracy', 'N/A')}%
+
+**2. ACOUSTIC FEATURES (Librosa Analysis):**
+- Pitch contour: {len(pitch_contour)} samples, avg: {sum(pitch_contour)/len(pitch_contour) if pitch_contour else 'N/A'} Hz
+- Formant ratios: {formants}
+- MFCC coefficients: {len(mfcc_mean)} features
+- Intensity: {intensity}
+- Per-phoneme features: {len(per_phoneme_features)} phonemes analyzed
+- Speaking rate: {state.get('speaking_rate', {}).get('words_per_second', 'N/A')} words/sec
+
+**3. PHONEME DEVIATIONS (MFA Alignment):**
+{json.dumps(state['phoneme_deviations'], indent=2)}
+
+**4. USER HISTORY (MongoDB - Iterative Learning):**
+- Past sessions: {state['user_history'].get('past_sessions', 0)}
+- Average score: {state['user_history'].get('average_accent_score', 0):.1f}%
+- Struggle areas: {state['user_history'].get('struggle_areas', [])}
+
+**5. ML ACCENT CLASSIFIER (wav2vec2 + CNN):**
+- Predicted accent: {state.get('accent_classification', {}).get('predicted_accent', 'N/A')}
+- Confidence: {state.get('accent_classification', {}).get('confidence', 0):.2f}
+- Method: {state.get('accent_classification', {}).get('method', 'N/A')}
+- All accent probabilities: {json.dumps(state.get('accent_classification', {}).get('accent_probabilities', {}), indent=2)}
+
+**6. TARGET ACCENT RULES ({state['target_accent']}):**
+{json.dumps(accent_rules, indent=2)}
+
+**YOUR TASK:**
+Reason over these MULTIPLE SIGNALS to:
+1. Identify accent patterns using the rules above
+2. Connect phoneme deviations to acoustic features (e.g., if 'th' → 'd', check formants)
+3. Use historical data to show progress/consistency
+4. Generate personalized feedback that combines all signals
+
+Analyze and provide feedback in JSON format as specified.
+            """
+            
+            # Replace the user message with enhanced prompt
+            if llm_request.contents and len(llm_request.contents) > 0:
+                for content in llm_request.contents:
+                    if content.role == "user" and content.parts:
+                        content.parts[0].text = enhanced_prompt
+                        break
+            
+            logger.info(f"[BEFORE MODEL] Enhanced prompt with multi-signal data for {state['target_accent']} accent")
     except json.JSONDecodeError:
         # Not JSON, continue with normal processing
         pass
+    except Exception as e:
+        logger.error(f"Error in before_model_callback: {e}")
     
     logger.info("[BEFORE MODEL] Processing accent analysis request")
     return None  # Continue with normal model request
@@ -171,29 +243,110 @@ def _parse_feedback_to_json(response_text: str, state: Dict) -> Dict[str, Any]:
     }
 
 
-# Create ADK Agent
+# Accent-specific rules for reasoning (Rule + AI Hybrid approach)
+ACCENT_RULES = {
+    "american": {
+        "phoneme_patterns": {
+            "th_as_d": "If 'th' (/θ/ or /ð/) is pronounced as 'd', this indicates non-native English accent",
+            "r_pronunciation": "American 'r' is retroflex - tongue curls back",
+            "vowel_merger": "American English merges 'cot' and 'caught' sounds",
+            "t_flapping": "Intervocalic 't' becomes flap /ɾ/ (e.g., 'water' → 'waɾer')"
+        },
+        "pitch_patterns": {
+            "rising_contour": "If pitch contour rises unusually at end, may indicate question intonation or non-native pattern",
+            "flat_intonation": "American English has varied intonation - flat patterns suggest non-native"
+        },
+        "stress_patterns": {
+            "word_stress": "American English has strong word stress - weak stress indicates accent issues"
+        }
+    },
+    "british": {
+        "phoneme_patterns": {
+            "r_dropping": "British English drops 'r' after vowels (non-rhotic) - pronouncing 'r' indicates American influence",
+            "vowel_quality": "British vowels are more fronted (e.g., 'bath' vs 'bath')",
+            "glottal_stop": "British English uses glottal stops for 't' in some positions"
+        },
+        "pitch_patterns": {
+            "higher_pitch": "British English tends to have higher average pitch than American",
+            "intonation": "British intonation patterns differ from American"
+        }
+    },
+    "australian": {
+        "phoneme_patterns": {
+            "vowel_raising": "Australian English raises certain vowels (e.g., 'dance' sounds like 'dahnce')",
+            "diphthong_shift": "Australian diphthongs are shifted compared to British"
+        }
+    }
+}
+
+
+# Create ADK Agent with enhanced reasoning capabilities
 if ADK_AVAILABLE:
     root_agent = LlmAgent(
         name="accent_coach_agent",
         model="gemini-2.0-flash",
-        description="AI agent that analyzes pronunciation and generates personalized accent feedback",
+        description="AI agent that analyzes pronunciation using multi-signal approach (Whisper STT + acoustic features + historical data)",
         instruction="""
-        You are an expert accent coach helping users improve their pronunciation.
+        You are an expert accent coach with deep knowledge of phonetics, acoustic analysis, and accent patterns.
         
-        Analyze the provided phoneme deviation data and acoustic features to:
-        1. Identify strengths in the user's pronunciation
-        2. Identify specific weaknesses (phonemes with high deviation scores)
-        3. Generate personalized exercises targeting problem areas
-        4. Provide encouraging, actionable feedback
+        You receive MULTIPLE SIGNALS to analyze:
+        1. Whisper transcription (text + language detection)
+        2. Acoustic features from Librosa (MFCCs, pitch contour, formants, intensity)
+        3. Phoneme deviations from MFA alignment
+        4. Historical user data from MongoDB (past sessions, progress patterns)
         
-        Return your analysis in JSON format with:
-        - accent_score: 0-100 score
-        - strengths: List of positive aspects
-        - weaknesses: List of areas needing improvement
-        - personalized_exercises: List of specific practice exercises
-        - feedback_summary: Natural language summary
+        Your task is to REASON over these signals (not just pattern match) to:
         
-        Be encouraging and specific in your feedback.
+        **1. ACCENT IDENTIFICATION & ANALYSIS:**
+        - Compare transcribed text to expected text (word accuracy)
+        - Analyze phoneme deviations to identify specific sound issues
+        - Use acoustic features (pitch, formants, stress) to infer accent characteristics
+        - Apply linguistic rules to detect accent patterns:
+          * If 'th' (/θ/ or /ð/) is pronounced as 'd', likely non-native English
+          * If pitch contour rises unusually, may indicate question intonation or non-native pattern
+          * If 'r' is dropped in British English context, indicates American influence
+          * If pitch is too flat, suggests non-native intonation patterns
+        
+        **2. PERSONALIZED FEEDBACK GENERATION:**
+        - Use user_history to track progress over time
+        - Identify which phonemes are consistently problematic (vs. one-time errors)
+        - Compare current session to past sessions to show improvement
+        - Generate feedback that adapts to user's learning trajectory
+        
+        **3. MULTI-SIGNAL REASONING:**
+        - If Whisper transcription doesn't match expected text → word accuracy issue
+        - If phoneme deviations are high BUT acoustic features are good → timing/rhythm issue
+        - If pitch is off BUT phonemes are correct → intonation issue
+        - If formants are wrong → vowel quality issue
+        
+        **4. RULE + AI HYBRID APPROACH:**
+        Apply these linguistic rules, then use AI reasoning to interpret:
+        - Phoneme substitution patterns (e.g., 'th' → 'd', 'r' → 'l')
+        - Pitch contour analysis (rising/falling/flat patterns)
+        - Stress pattern detection (word stress, sentence stress)
+        - Vowel quality (formant analysis)
+        - Consonant articulation (MFCC analysis)
+        
+        **5. ITERATIVE FEEDBACK:**
+        - If user_history shows improvement in specific phonemes → acknowledge progress
+        - If same phonemes keep appearing as problems → suggest focused practice
+        - If user is consistently scoring well → provide advanced challenges
+        
+        **OUTPUT FORMAT (JSON):**
+        {
+            "accent_score": 0-100,
+            "strengths": ["specific positive aspects"],
+            "weaknesses": ["specific areas needing improvement with reasoning"],
+            "personalized_exercises": ["actionable exercises targeting specific issues"],
+            "feedback_summary": "Encouraging, specific summary explaining the analysis",
+            "accent_insights": {
+                "detected_patterns": ["patterns you identified"],
+                "likely_influences": ["what might be influencing their accent"],
+                "progress_indicators": ["how they're improving"]
+            }
+        }
+        
+        Be specific, encouraging, and use your reasoning to connect the signals together.
         """,
         before_model_callback=before_model_callback,
         after_model_callback=after_model_callback,
@@ -227,9 +380,18 @@ async def run_accent_agent(data: Dict[str, Any]) -> Dict[str, Any]:
             - feedback_summary: Natural language feedback
     """
     try:
+        # Log what data we're sending to the agent
+        logger.info(f"[AGENT] Calling agent with data keys: {list(data.keys())}")
+        logger.info(f"[AGENT] Phoneme deviations: {len(data.get('phoneme_deviations', {}))} phonemes")
+        logger.info(f"[AGENT] Acoustic features keys: {list(data.get('acoustic_features', {}).keys())}")
+        logger.info(f"[AGENT] User history: {data.get('user_history', {})}")
+        logger.info(f"[AGENT] Speaking rate: {data.get('speaking_rate', {})}")
+        logger.info(f"[AGENT] Scoring breakdown keys: {list(data.get('scoring_breakdown', {}).keys())}")
+        
         if ADK_AVAILABLE and root_agent:
             # Use ADK agent
             prompt = json.dumps(data, indent=2)
+            logger.info(f"[AGENT] Sending prompt to ADK agent (length: {len(prompt)} chars)")
             response = root_agent.run(prompt)
             
             # Extract structured output from response
@@ -243,20 +405,73 @@ async def run_accent_agent(data: Dict[str, Any]) -> Dict[str, Any]:
                 return _generate_fallback_feedback(data)
         
         elif FALLBACK_AVAILABLE:
-            # Use direct Gemini API
+            # Use direct Gemini API with enhanced multi-signal prompt
             model = genai.GenerativeModel("gemini-2.0-flash")
             
+            # Build comprehensive prompt with all signals
+            target_accent = data.get("target_accent", "American").lower()
+            accent_rules = ACCENT_RULES.get(target_accent, ACCENT_RULES.get("american", {}))
+            
+            acoustic_features = data.get("acoustic_features", {})
+            user_history = data.get("user_history", {})
+            speaking_rate = data.get("speaking_rate", {})
+            
             prompt = f"""
-            Analyze this pronunciation data and provide feedback:
-            
-            {json.dumps(data, indent=2)}
-            
-            Return JSON with: accent_score, strengths, weaknesses, personalized_exercises, feedback_summary
+You are an expert accent coach analyzing pronunciation using MULTIPLE SIGNALS.
+
+**SIGNAL 1: Whisper Transcription (STT)**
+- Transcribed: "{data.get('transcribed_text', '')}"
+- Expected: "{data.get('expected_text', '')}"
+- Word accuracy: {data.get('word_accuracy', 'N/A')}%
+
+**SIGNAL 2: Acoustic Features (Librosa)**
+- Pitch: {acoustic_features.get('pitch_contour', [])[:5]}... ({len(acoustic_features.get('pitch_contour', []))} samples)
+- Formants: {acoustic_features.get('formant_ratios', [])}
+- Intensity: {acoustic_features.get('intensity', 0)}
+- Speaking rate: {speaking_rate.get('words_per_second', 'N/A')} words/sec
+
+**SIGNAL 3: Phoneme Deviations (MFA)**
+{json.dumps(data.get('phoneme_deviations', {}), indent=2)}
+
+**SIGNAL 4: User History (MongoDB - Iterative Learning)**
+- Past sessions: {user_history.get('past_sessions', 0)}
+- Average score: {user_history.get('average_accent_score', 0):.1f}%
+- Struggle areas: {user_history.get('struggle_areas', [])}
+
+**SIGNAL 5: Accent Rules ({data.get('target_accent', 'American')})**
+{json.dumps(accent_rules, indent=2)}
+
+**REASONING TASK:**
+1. Connect signals: If 'th' → 'd' substitution AND formants are off → vowel quality + consonant issue
+2. Use history: If same phonemes keep appearing → suggest focused practice
+3. Apply rules: Use accent-specific patterns to identify issues
+4. Show progress: Compare to past sessions
+
+Return JSON:
+{{
+    "accent_score": 0-100,
+    "strengths": ["specific aspects"],
+    "weaknesses": ["specific issues with reasoning"],
+    "personalized_exercises": ["actionable exercises"],
+    "feedback_summary": "Encouraging summary",
+    "accent_insights": {{
+        "detected_patterns": ["patterns you found"],
+        "likely_influences": ["what influences their accent"],
+        "progress_indicators": ["improvement signs"]
+    }}
+}}
             """
             
             response = model.generate_content(prompt)
             try:
-                return json.loads(response.text)
+                # Extract JSON from response
+                response_text = response.text
+                json_start = response_text.find("{")
+                json_end = response_text.rfind("}") + 1
+                if json_start >= 0 and json_end > json_start:
+                    return json.loads(response_text[json_start:json_end])
+                else:
+                    return json.loads(response_text)
             except:
                 return _generate_fallback_feedback(data)
         

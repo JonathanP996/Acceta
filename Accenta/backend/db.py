@@ -69,6 +69,9 @@ class Database:
         # Feedback collection
         await cls.db.feedback.create_index([("user_id", 1), ("generated_at", -1)])
         
+        # Voice baselines collection (for onboarding)
+        await cls.db.voice_baselines.create_index([("user_id", 1), ("language", 1), ("target_accent", 1)], unique=True)
+        
         logger.info("Database indexes created")
     
     @classmethod

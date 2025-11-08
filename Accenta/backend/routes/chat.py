@@ -287,9 +287,11 @@ async def chat_message_with_audio(request: ChatRequest):
         accent_name = request.target_accent.lower().replace(' english', '').replace('english', '').strip()
         
         try:
+            # Use robotic voice for Wally
             audio_bytes = await text_to_speech(
                 text=chat_response.ai_message,
-                accent=accent_name
+                accent=accent_name,
+                robotic=True  # Wally has a robotic voice
             )
             
             if audio_bytes and len(audio_bytes) > 0:

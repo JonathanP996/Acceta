@@ -43,6 +43,9 @@ google-generativeai==0.8.5
 # ElevenLabs
 elevenlabs==1.7.0
 
+# ML Accent Classifier
+transformers>=4.30.0
+
 # Utilities
 python-dateutil==2.9.0
 
