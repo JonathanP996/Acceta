@@ -40,6 +40,7 @@ const InitialTest = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { language, accent } = location.state || {};
+  const [showIntro, setShowIntro] = useState(true);
   const [currentPrompt, setCurrentPrompt] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -177,6 +178,10 @@ const InitialTest = () => {
       ? testResults.reduce((sum, r) => sum + (r.result.accent_score || 0), 0) / testResults.length
       : 0;
 
+    // Mark that user has completed initial test and has a profile
+    localStorage.setItem('hasCompletedInitialTest', 'true');
+    localStorage.setItem('hasVisitedDashboard', 'true');
+
     // Navigate to dashboard with results
     navigate('/dashboard', {
       state: {
@@ -189,11 +194,229 @@ const InitialTest = () => {
     });
   };
 
+  const handleBack = () => {
+    // Don't allow exit while recording
+    if (isRecording) {
+      alert('Please stop recording before exiting.');
+      return;
+    }
+
+    // If on intro screen, go back to accent selection
+    if (showIntro) {
+      navigate('/accent-selection/' + (language?.id || 'english'), { state: { language } });
+      return;
+    }
+
+    // If on test screen, show confirmation dialog if there's progress
+    if (testResults.length > 0 || currentPrompt > 0) {
+      const confirmed = window.confirm(
+        'Are you sure you want to exit? Your progress will be lost.'
+      );
+      if (confirmed) {
+        // Clean up audio if needed
+        if (audioCapture) {
+          audioCapture.cleanup();
+        }
+        navigate('/accent-selection/' + (language?.id || 'english'), { state: { language } });
+      }
+    } else {
+      // No progress yet, just go back
+      if (audioCapture) {
+        audioCapture.cleanup();
+      }
+      navigate('/accent-selection/' + (language?.id || 'english'), { state: { language } });
+    }
+  };
+
   const progress = ((currentPrompt + 1) / TEST_PROMPTS.length) * 100;
+
+  // Intro/Onboarding Screen
+  if (showIntro) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-accenta-primary to-accenta-secondary py-12 px-4">
+        <div className="max-w-3xl mx-auto">
+          {/* Back Button */}
+          <button
+            onClick={handleBack}
+            className="mb-4 flex items-center gap-2 text-white hover:text-white/80 transition-colors bg-white/10 hover:bg-white/20 px-4 py-2 rounded-lg backdrop-blur-sm"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            <span>Back</span>
+          </button>
+          
+          <div className="bg-white rounded-2xl shadow-2xl p-8 md:p-12">
+            {/* Header */}
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center justify-center w-20 h-20 bg-accenta-primary rounded-full mb-4">
+                <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+              </div>
+              <h1 className="text-4xl font-bold text-gray-900 mb-2">
+                Welcome to Your Initial Assessment
+              </h1>
+              <p className="text-xl text-gray-600">
+                Let's establish your baseline pronunciation
+              </p>
+            </div>
+
+            {/* What is it */}
+            <div className="mb-8">
+              <h2 className="text-2xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <svg className="w-6 h-6 text-accenta-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                What is this?
+              </h2>
+              <p className="text-gray-700 leading-relaxed">
+                The Initial Assessment is a comprehensive pronunciation test that evaluates your current accent and pronunciation skills. 
+                You'll be asked to repeat {TEST_PROMPTS.length} carefully selected phrases that test different aspects of pronunciation, 
+                including vowel sounds, consonant clusters, rhythm, and intonation.
+              </p>
+            </div>
+
+            {/* Purpose */}
+            <div className="mb-8">
+              <h2 className="text-2xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <svg className="w-6 h-6 text-accenta-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Why is this important?
+              </h2>
+              <div className="space-y-3 text-gray-700">
+                <div className="flex items-start gap-3">
+                  <div className="flex-shrink-0 w-6 h-6 bg-accenta-primary/10 rounded-full flex items-center justify-center mt-0.5">
+                    <span className="text-accenta-primary font-semibold text-sm">1</span>
+                  </div>
+                  <div>
+                    <p className="font-medium">Establishes Your Baseline</p>
+                    <p className="text-sm text-gray-600">We'll measure your starting point so you can track your progress over time.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="flex-shrink-0 w-6 h-6 bg-accenta-primary/10 rounded-full flex items-center justify-center mt-0.5">
+                    <span className="text-accenta-primary font-semibold text-sm">2</span>
+                  </div>
+                  <div>
+                    <p className="font-medium">Personalizes Your Learning</p>
+                    <p className="text-sm text-gray-600">Identifies specific areas where you need the most practice.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="flex-shrink-0 w-6 h-6 bg-accenta-primary/10 rounded-full flex items-center justify-center mt-0.5">
+                    <span className="text-accenta-primary font-semibold text-sm">3</span>
+                  </div>
+                  <div>
+                    <p className="font-medium">Creates Your Learning Path</p>
+                    <p className="text-sm text-gray-600">Helps us recommend the best practice exercises for your skill level.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* How to do it */}
+            <div className="mb-8">
+              <h2 className="text-2xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <svg className="w-6 h-6 text-accenta-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                </svg>
+                How to complete the test
+              </h2>
+              <div className="space-y-4">
+                <div className="flex gap-4 p-4 bg-gray-50 rounded-lg">
+                  <div className="flex-shrink-0 w-8 h-8 bg-accenta-primary text-white rounded-full flex items-center justify-center font-bold">
+                    1
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-gray-900 mb-1">Listen to the phrase</p>
+                    <p className="text-sm text-gray-600">Click the "Play Phrase" button to hear how it should sound in {accent?.name || 'your target accent'}.</p>
+                  </div>
+                </div>
+                <div className="flex gap-4 p-4 bg-gray-50 rounded-lg">
+                  <div className="flex-shrink-0 w-8 h-8 bg-accenta-primary text-white rounded-full flex items-center justify-center font-bold">
+                    2
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-gray-900 mb-1">Repeat what you heard</p>
+                    <p className="text-sm text-gray-600">Click "Start Recording" and speak the phrase clearly. Try to match the accent and pronunciation as closely as possible.</p>
+                  </div>
+                </div>
+                <div className="flex gap-4 p-4 bg-gray-50 rounded-lg">
+                  <div className="flex-shrink-0 w-8 h-8 bg-accenta-primary text-white rounded-full flex items-center justify-center font-bold">
+                    3
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-gray-900 mb-1">Stop recording</p>
+                    <p className="text-sm text-gray-600">Click "Stop Recording" when you're done. Your pronunciation will be analyzed automatically.</p>
+                  </div>
+                </div>
+                <div className="flex gap-4 p-4 bg-gray-50 rounded-lg">
+                  <div className="flex-shrink-0 w-8 h-8 bg-accenta-primary text-white rounded-full flex items-center justify-center font-bold">
+                    4
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-gray-900 mb-1">Continue to the next phrase</p>
+                    <p className="text-sm text-gray-600">Repeat this process for all {TEST_PROMPTS.length} phrases. Take your time and speak naturally!</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Tips */}
+            <div className="mb-8 p-4 bg-blue-50 border-l-4 border-blue-500 rounded">
+              <h3 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                </svg>
+                Tips for best results
+              </h3>
+              <ul className="text-sm text-blue-800 space-y-1 ml-7">
+                <li>• Find a quiet environment where you won't be interrupted</li>
+                <li>• Use a good quality microphone if possible</li>
+                <li>• Speak clearly and at a natural pace</li>
+                <li>• You can replay the phrase as many times as you need</li>
+                <li>• Don't worry about perfection - this is just a baseline!</li>
+              </ul>
+            </div>
+
+            {/* Start Button */}
+            <div className="text-center">
+              <button
+                onClick={() => setShowIntro(false)}
+                className="px-8 py-4 bg-accenta-primary text-white rounded-lg font-semibold text-lg hover:bg-accenta-secondary transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 flex items-center gap-2 mx-auto"
+              >
+                <span>Start Assessment</span>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+              </button>
+              <p className="text-sm text-gray-500 mt-4">
+                This will take approximately {Math.ceil(TEST_PROMPTS.length * 0.5)} minutes
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-accenta-primary to-accenta-secondary py-12 px-4">
       <div className="max-w-4xl mx-auto">
+        {/* Back Button */}
+        <button
+          onClick={handleBack}
+          disabled={isRecording || isProcessing}
+          className="mb-4 flex items-center gap-2 text-white hover:text-white/80 transition-colors bg-white/10 hover:bg-white/20 px-4 py-2 rounded-lg backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          <span>Exit Test</span>
+        </button>
+
         {/* Progress Bar */}
         <div className="mb-8">
           <div className="flex justify-between text-white mb-2">

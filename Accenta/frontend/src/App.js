@@ -14,6 +14,7 @@ import Dashboard from './components/Dashboard';
 import Profile from './components/Profile';
 import Practice from './components/Practice';
 import CuratedPractice from './components/CuratedPractice';
+import LiveChat from './components/LiveChat';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -85,6 +86,14 @@ function App() {
           element={
             <ProtectedRoute>
               <CuratedPractice />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/live-chat"
+          element={
+            <ProtectedRoute>
+              <LiveChat />
             </ProtectedRoute>
           }
         />

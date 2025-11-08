@@ -13,6 +13,10 @@ export const API_ENDPOINTS = {
   // Analysis
   ANALYZE_ACCENT: `${API_BASE_URL}/api/analyze_accent`,
   
+  // Chat
+  CHAT_MESSAGE: `${API_BASE_URL}/api/chat/message`,
+  CHAT_MESSAGE_AUDIO: `${API_BASE_URL}/api/chat/message/audio`,
+  
   // WebSocket
   WS_PRACTICE: (sessionId) => `ws://localhost:8000/ws/practice/${sessionId}`,
 };

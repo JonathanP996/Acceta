@@ -1,10 +1,29 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LANGUAGES, searchLanguages } from '../data/languages';
+import { authService } from '../services/api';
 
 const LanguageSelection = () => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [hasProfile, setHasProfile] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    // Check if user has a profile by checking:
+    // 1. If they've completed initial test (stored in localStorage or state)
+    // 2. If they have profile data in localStorage
+    // 3. If they've visited dashboard before (indicates they have a profile)
+    const user = authService.getCurrentUser();
+    if (user) {
+      // Check for profile indicators
+      const hasCompletedTest = localStorage.getItem('hasCompletedInitialTest');
+      const hasProfileData = localStorage.getItem('userProfile');
+      const hasVisitedDashboard = localStorage.getItem('hasVisitedDashboard');
+      
+      // User has a profile if any of these are true
+      setHasProfile(!!(hasCompletedTest || hasProfileData || hasVisitedDashboard));
+    }
+  }, []);
 
   const filteredLanguages = useMemo(() => {
     if (!searchQuery.trim()) {
@@ -17,12 +36,34 @@ const LanguageSelection = () => {
     navigate(`/accent-selection/${language.id}`, { state: { language } });
   };
 
+  const handleGoHome = () => {
+    navigate('/dashboard');
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-accenta-primary to-accenta-secondary py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">Choose Your Language</h1>
-          <p className="text-white/80">Select the language you want to learn</p>
+        {/* Header with Go Home button if user has profile */}
+        <div className="mb-8">
+          <div className="flex justify-between items-center mb-4">
+            {hasProfile && (
+              <button
+                onClick={handleGoHome}
+                className="flex items-center gap-2 text-white hover:text-white/90 transition-colors bg-white/10 hover:bg-white/20 px-4 py-2 rounded-lg backdrop-blur-sm"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg>
+                <span className="font-medium">Go to Home</span>
+              </button>
+            )}
+            {!hasProfile && <div></div>} {/* Spacer when no button */}
+            <div className="flex-1"></div>
+          </div>
+          <div className="text-center">
+            <h1 className="text-4xl font-bold text-white mb-2">Choose Your Language</h1>
+            <p className="text-white/80">Select the language you want to learn</p>
+          </div>
         </div>
 
         {/* Search Bar */}

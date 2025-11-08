@@ -111,5 +111,52 @@ export const ttsService = {
   },
 };
 
+// Chat services
+export const chatService = {
+  sendMessage: async (data) => {
+    const response = await api.post(API_ENDPOINTS.CHAT_MESSAGE, data);
+    return response.data;
+  },
+  
+  sendMessageWithAudio: async (data) => {
+    const response = await api.post(API_ENDPOINTS.CHAT_MESSAGE_AUDIO, data);
+    
+    // Convert base64 audio to blob
+    let audioBlob = null;
+    if (response.data.audio_base64) {
+      try {
+        const audioBase64 = response.data.audio_base64;
+        console.log('Received audio base64, length:', audioBase64.length);
+        
+        // Validate base64 string
+        if (!audioBase64 || audioBase64.length === 0) {
+          console.warn('Empty audio_base64 string received');
+        } else {
+          const audioBytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
+          audioBlob = new Blob([audioBytes], { type: 'audio/mpeg' });
+          console.log('Created audio blob:', { size: audioBlob.size, type: audioBlob.type });
+          
+          // Validate blob
+          if (audioBlob.size === 0) {
+            console.error('Created audio blob is empty!');
+            audioBlob = null;
+          }
+        }
+      } catch (error) {
+        console.error('Error converting base64 to blob:', error);
+        audioBlob = null;
+      }
+    } else {
+      console.warn('No audio_base64 in response. Response keys:', Object.keys(response.data || {}));
+    }
+    
+    return {
+      audio: audioBlob,
+      message: response.data.ai_message,
+      pronunciation_feedback: response.data.pronunciation_feedback,
+    };
+  },
+};
+
 export default api;
 

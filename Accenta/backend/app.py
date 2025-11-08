@@ -87,12 +87,28 @@ async def health_check():
     except Exception as e:
         db_status = f"error: {str(e)}"
     
+    # Check Gemini status
+    try:
+        from routes.chat import GEMINI_AVAILABLE, GEMINI_STATUS, GEMINI_ERROR
+        gemini_status = {
+            "available": GEMINI_AVAILABLE,
+            "status": GEMINI_STATUS,
+            "error": GEMINI_ERROR
+        }
+    except Exception as e:
+        gemini_status = {
+            "available": False,
+            "status": "unknown",
+            "error": str(e)
+        }
+    
     return {
         "status": "healthy",
         "database": db_status,
+        "gemini": gemini_status,
         "services": {
             "database": "MongoDB Atlas",
-            "ai_agent": "Gemini ADK",
+            "ai_agent": "Gemini" if gemini_status.get("available") else "Fallback",
             "tts": "ElevenLabs",
             "transcription": "Whisper"
         }
@@ -100,13 +116,14 @@ async def health_check():
 
 
 # Import routes AFTER CORS middleware is configured
-from routes import analyze, auth, practice, tts
+from routes import analyze, auth, practice, tts, chat
 
 # Register routes
 app.include_router(analyze.router)
 app.include_router(auth.router)
 app.include_router(practice.router)
 app.include_router(tts.router)
+app.include_router(chat.router)
 
 if __name__ == "__main__":
     import uvicorn
