@@ -20,6 +20,7 @@ class TTSRequest(BaseModel):
     text: str
     voice_id: Optional[str] = None
     accent: Optional[str] = None
+    robotic: bool = False
 
 
 @router.post("/generate")
@@ -39,7 +40,8 @@ async def generate_tts(request: TTSRequest):
         audio_bytes = await text_to_speech(
             text=request.text,
             voice_id=request.voice_id,
-            accent=request.accent
+            accent=request.accent,
+            robotic=request.robotic
         )
         
         if audio_bytes is None:

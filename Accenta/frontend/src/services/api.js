@@ -101,10 +101,10 @@ export const analysisService = {
 
 // TTS services
 export const ttsService = {
-  generateSpeech: async (text, voiceId = null, accent = null) => {
+  generateSpeech: async (text, voiceId = null, accent = null, robotic = false) => {
     const response = await api.post(
       `${API_BASE_URL}/api/tts/generate`,
-      { text, voice_id: voiceId, accent },
+      { text, voice_id: voiceId, accent, robotic },
       { responseType: 'blob' } // Important: get audio as blob
     );
     return response.data;
@@ -132,13 +132,26 @@ export const chatService = {
         if (!audioBase64 || audioBase64.length === 0) {
           console.warn('Empty audio_base64 string received');
         } else {
-          const audioBytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
-          audioBlob = new Blob([audioBytes], { type: 'audio/mpeg' });
-          console.log('Created audio blob:', { size: audioBlob.size, type: audioBlob.type });
-          
-          // Validate blob
-          if (audioBlob.size === 0) {
-            console.error('Created audio blob is empty!');
+          try {
+            const audioBytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
+            audioBlob = new Blob([audioBytes], { type: 'audio/mpeg' });
+            console.log('✅ Created audio blob:', { 
+              size: audioBlob.size, 
+              type: audioBlob.type,
+              firstBytes: Array.from(audioBytes.slice(0, 10))
+            });
+            
+            // Validate blob
+            if (audioBlob.size === 0) {
+              console.error('❌ Created audio blob is empty!');
+              audioBlob = null;
+            } else if (audioBlob.size < 100) {
+              console.warn('⚠️ Audio blob is very small, might be invalid:', audioBlob.size);
+            } else {
+              console.log('✅ Audio blob is valid and ready to play');
+            }
+          } catch (conversionError) {
+            console.error('❌ Error converting base64 to blob:', conversionError);
             audioBlob = null;
           }
         }

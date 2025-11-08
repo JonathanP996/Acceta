@@ -58,6 +58,28 @@ class SkillRating(BaseModel):
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 
 
+class VoiceBaseline(BaseModel):
+    """Personalized voice baseline extracted from onboarding"""
+    user_id: str
+    language: str
+    # Voice characteristics (personal traits, not accent-specific)
+    baseline_pitch_mean: float  # User's natural pitch (Hz)
+    baseline_pitch_std: float   # User's pitch variation
+    baseline_intensity_mean: float  # User's natural intensity
+    baseline_intensity_std: float
+    baseline_mfcc_profile: List[float]  # User's typical MFCC pattern (13 coefficients)
+    baseline_rhythm_cv: float  # User's natural timing variability
+    baseline_vowel_consonant_ratio: float  # User's natural V/C ratio
+    # Predicted benchmarks for target accent (AI-adjusted from user's baseline)
+    predicted_pitch_mean: float  # Predicted pitch for target accent
+    predicted_pitch_range: tuple  # (min, max) for target accent
+    predicted_mfcc_profile: List[float]  # Predicted MFCCs for target accent
+    predicted_rhythm_cv: float  # Predicted rhythm for target accent
+    predicted_vc_ratio: float  # Predicted V/C ratio for target accent
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class UserProfile(BaseModel):
     """User profile for a specific language/accent"""
     user_id: str
@@ -70,6 +92,7 @@ class UserProfile(BaseModel):
     total_practice_time_minutes: int = 0
     total_sessions: int = 0
     struggle_areas: List[str] = []  # List of phonemes or skills
+    voice_baseline: Optional[VoiceBaseline] = None  # NEW: Personalized voice baseline
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

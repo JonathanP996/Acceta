@@ -39,7 +39,8 @@ async def text_to_speech(
     text: str,
     voice_id: Optional[str] = None,
     model_id: str = "eleven_multilingual_v2",
-    accent: Optional[str] = None
+    accent: Optional[str] = None,
+    robotic: bool = False
 ) -> bytes:
     """
     Convert text to speech using ElevenLabs API
@@ -62,9 +63,10 @@ async def text_to_speech(
         if voice_id:
             final_voice_id = voice_id
         elif accent:
-            final_voice_id = _get_voice_for_accent(accent)
+            final_voice_id = _get_voice_for_accent(accent, robotic=robotic)
         else:
-            final_voice_id = "21m00Tcm4TlvDq8ikWAM"  # Default: Rachel (British)
+            # Default: use robotic voice if requested, otherwise Rachel
+            final_voice_id = "pNInz6obpgDQGcFmaJgB" if robotic else "21m00Tcm4TlvDq8ikWAM"
         
         url = f"{ELEVENLABS_API_URL}/{final_voice_id}"
         
@@ -78,8 +80,11 @@ async def text_to_speech(
             "text": text,
             "model_id": model_id,
             "voice_settings": {
-                "stability": 0.5,
-                "similarity_boost": 0.75
+                # Robotic voice settings: lower stability = more robotic, lower similarity = less natural
+                "stability": 0.15 if robotic else 0.5,  # Lower = more robotic/variable
+                "similarity_boost": 0.2 if robotic else 0.75,  # Lower = less natural, more robotic
+                "style": 0.0,  # Neutral style
+                "use_speaker_boost": False if robotic else True
             }
         }
         
@@ -96,15 +101,25 @@ async def text_to_speech(
         raise Exception(f"TTS error: {str(e)}")
 
 
-def _get_voice_for_accent(accent: str) -> str:
+def _get_voice_for_accent(accent: str, robotic: bool = False) -> str:
     """
     Map accent name to ElevenLabs voice ID
     This is a simplified mapping - you can expand with more voices
+    
+    Args:
+        accent: Accent name
+        robotic: If True, use a more robotic-sounding voice
     """
     if not accent:
         return "EXAVITQu4vr4xnSDxMaL"  # Default: American
     
     accent_lower = accent.lower()
+    
+    # For robotic voice, use a deeper/more mechanical voice
+    if robotic:
+        # Use a deeper voice ID that sounds more robotic
+        # "pNInz6obpgDQGcFmaJgB" (Adam) tends to sound more robotic with low stability
+        return "pNInz6obpgDQGcFmaJgB"
     
     # Map common accent names to voice IDs
     voice_map = {

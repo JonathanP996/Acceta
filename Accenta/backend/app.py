@@ -11,8 +11,12 @@ from db import Database
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging - ensure INFO level and format
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
 
@@ -116,7 +120,7 @@ async def health_check():
 
 
 # Import routes AFTER CORS middleware is configured
-from routes import analyze, auth, practice, tts, chat
+from routes import analyze, auth, practice, tts, chat, onboarding
 
 # Register routes
 app.include_router(analyze.router)
@@ -124,6 +128,7 @@ app.include_router(auth.router)
 app.include_router(practice.router)
 app.include_router(tts.router)
 app.include_router(chat.router)
+app.include_router(onboarding.router)  # NEW: Onboarding endpoint
 
 if __name__ == "__main__":
     import uvicorn
