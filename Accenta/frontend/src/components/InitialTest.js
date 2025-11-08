@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
-import { analysisService } from '../services/api';
+import { analysisService, ttsService } from '../services/api';
 
 const TEST_PROMPTS = [
   "The quick brown fox jumps over the lazy dog",
@@ -79,15 +79,44 @@ const InitialTest = () => {
     
     setIsPlaying(true);
     try {
-      // In production, this would call ElevenLabs TTS
-      // For now, we'll use Web Speech API as fallback
-      const utterance = new SpeechSynthesisUtterance(TEST_PROMPTS[currentPrompt]);
-      utterance.lang = language.id === 'english' ? 'en-US' : language.id;
-      utterance.onend = () => setIsPlaying(false);
-      speechSynthesis.speak(utterance);
+      // Use ElevenLabs TTS via backend
+      // Extract accent name (e.g., "American English" -> "american")
+      const accentName = accent.name.toLowerCase().replace(' english', '').replace('english', '').trim();
+      const audioBlob = await ttsService.generateSpeech(
+        TEST_PROMPTS[currentPrompt],
+        null, // voice_id - will use default
+        accentName // accent name for voice selection
+      );
+      
+      // Create audio element and play
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      
+      audio.onended = () => {
+        setIsPlaying(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+      
+      audio.onerror = (error) => {
+        console.error('Error playing audio:', error);
+        setIsPlaying(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+      
+      await audio.play();
     } catch (error) {
-      console.error('Error playing prompt:', error);
+      console.error('Error generating/playing TTS:', error);
       setIsPlaying(false);
+      // Fallback to Web Speech API if TTS fails
+      try {
+        const utterance = new SpeechSynthesisUtterance(TEST_PROMPTS[currentPrompt]);
+        utterance.lang = language.id === 'english' ? 'en-US' : language.id;
+        utterance.onend = () => setIsPlaying(false);
+        speechSynthesis.speak(utterance);
+      } catch (fallbackError) {
+        console.error('Fallback TTS also failed:', fallbackError);
+        setIsPlaying(false);
+      }
     }
   };
 

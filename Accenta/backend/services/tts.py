@@ -10,19 +10,34 @@ import requests
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env from project root
-env_path = Path(__file__).parent.parent.parent / ".env"
-load_dotenv(env_path)
+# Load .env from project root (Accenta directory)
+# Find the .env file by going up from backend/services/tts.py
+current_file = Path(__file__).resolve()
+# backend/services/tts.py -> backend/services -> backend -> Accenta
+project_root = current_file.parent.parent.parent
+env_path = project_root / ".env"
+
+# Also try loading from backend directory (if .env is there)
+if not env_path.exists():
+    env_path = current_file.parent.parent / ".env"
+
+load_dotenv(env_path, override=True)
 
 logger = logging.getLogger(__name__)
 
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()  # Strip whitespace
 ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech"
+
+# Log if key is loaded (for debugging)
+if ELEVENLABS_API_KEY:
+    logger.info(f"ElevenLabs API key loaded from {env_path}")
+else:
+    logger.warning(f"ElevenLabs API key NOT loaded. Checked: {env_path}")
 
 
 async def text_to_speech(
     text: str,
-    voice_id: str = "21m00Tcm4TlvDq8ikWAM",  # Default voice (Rachel)
+    voice_id: Optional[str] = None,
     model_id: str = "eleven_multilingual_v2",
     accent: Optional[str] = None
 ) -> bytes:
@@ -31,7 +46,7 @@ async def text_to_speech(
     
     Args:
         text: Text to convert to speech
-        voice_id: ElevenLabs voice ID
+        voice_id: ElevenLabs voice ID (optional)
         model_id: Model to use
         accent: Optional accent hint (e.g., "british", "american")
     
@@ -43,10 +58,15 @@ async def text_to_speech(
         raise ValueError("ElevenLabs API key not configured")
     
     try:
-        # Map accent to voice if provided
-        voice_id = _get_voice_for_accent(accent) if accent else voice_id
+        # Determine voice_id: use provided, or map from accent, or use default
+        if voice_id:
+            final_voice_id = voice_id
+        elif accent:
+            final_voice_id = _get_voice_for_accent(accent)
+        else:
+            final_voice_id = "21m00Tcm4TlvDq8ikWAM"  # Default: Rachel (British)
         
-        url = f"{ELEVENLABS_API_URL}/{voice_id}"
+        url = f"{ELEVENLABS_API_URL}/{final_voice_id}"
         
         headers = {
             "Accept": "audio/mpeg",
@@ -63,6 +83,7 @@ async def text_to_speech(
             }
         }
         
+        logger.info(f"Calling ElevenLabs TTS with voice_id: {final_voice_id}, text: {text[:50]}...")
         response = requests.post(url, json=data, headers=headers)
         response.raise_for_status()
         
@@ -80,17 +101,40 @@ def _get_voice_for_accent(accent: str) -> str:
     Map accent name to ElevenLabs voice ID
     This is a simplified mapping - you can expand with more voices
     """
-    accent_lower = accent.lower() if accent else ""
+    if not accent:
+        return "EXAVITQu4vr4xnSDxMaL"  # Default: American
     
+    accent_lower = accent.lower()
+    
+    # Map common accent names to voice IDs
     voice_map = {
         "british": "21m00Tcm4TlvDq8ikWAM",  # Rachel (British)
+        "british english": "21m00Tcm4TlvDq8ikWAM",
         "american": "EXAVITQu4vr4xnSDxMaL",  # Bella (American)
+        "american english": "EXAVITQu4vr4xnSDxMaL",
         "australian": "pNInz6obpgDQGcFmaJgB",  # Adam (Australian)
+        "australian english": "pNInz6obpgDQGcFmaJgB",
+        "canadian": "EXAVITQu4vr4xnSDxMaL",  # Use American for Canadian
+        "canadian english": "EXAVITQu4vr4xnSDxMaL",
+        "irish": "21m00Tcm4TlvDq8ikWAM",  # Use British for Irish
+        "irish english": "21m00Tcm4TlvDq8ikWAM",
+        "scottish": "21m00Tcm4TlvDq8ikWAM",  # Use British for Scottish
+        "scottish english": "21m00Tcm4TlvDq8ikWAM",
         "spanish": "ThT5KcBeYPX3keUQqHPh",  # Dorothy (Spanish)
         "french": "VR6AewLTigWG4xSOukaG",  # Arnold (French)
     }
     
-    return voice_map.get(accent_lower, voice_map["american"])
+    # Try exact match first
+    if accent_lower in voice_map:
+        return voice_map[accent_lower]
+    
+    # Try partial match (e.g., "British English" contains "british")
+    for key, voice_id in voice_map.items():
+        if key in accent_lower or accent_lower in key:
+            return voice_id
+    
+    # Default to American
+    return "EXAVITQu4vr4xnSDxMaL"
 
 
 async def save_tts_to_file(text: str, output_path: str, accent: Optional[str] = None) -> str:
@@ -112,4 +156,3 @@ async def save_tts_to_file(text: str, output_path: str, accent: Optional[str] = 
     
     logger.info(f"Saved TTS to {output_path}")
     return output_path
-

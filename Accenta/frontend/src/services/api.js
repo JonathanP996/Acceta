@@ -99,5 +99,17 @@ export const analysisService = {
   },
 };
 
+// TTS services
+export const ttsService = {
+  generateSpeech: async (text, voiceId = null, accent = null) => {
+    const response = await api.post(
+      `${API_BASE_URL}/api/tts/generate`,
+      { text, voice_id: voiceId, accent },
+      { responseType: 'blob' } // Important: get audio as blob
+    );
+    return response.data;
+  },
+};
+
 export default api;
 

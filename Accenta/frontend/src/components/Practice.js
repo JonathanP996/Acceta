@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
 import WaveformVisualization from './WaveformVisualization';
+import { ttsService } from '../services/api';
 
 export const PRACTICE_PHRASES = [
   "Hello, how are you today?",
@@ -98,11 +99,49 @@ const Practice = ({ profile: propProfile, customPhrases, isCurated }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timedMode, isRecording]);
 
-  const playPhrase = () => {
+  const playPhrase = async () => {
     setIsPlaying(true);
-    const utterance = new SpeechSynthesisUtterance(phrases[currentPhrase]);
-    utterance.onend = () => setIsPlaying(false);
-    speechSynthesis.speak(utterance);
+    try {
+      // Use ElevenLabs TTS via backend
+      // Extract accent name (e.g., "American English" -> "american")
+      const accentName = profile?.accent 
+        ? profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim()
+        : null;
+      const audioBlob = await ttsService.generateSpeech(
+        phrases[currentPhrase],
+        null, // voice_id - will use default
+        accentName // accent name for voice selection
+      );
+      
+      // Create audio element and play
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      
+      audio.onended = () => {
+        setIsPlaying(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+      
+      audio.onerror = (error) => {
+        console.error('Error playing audio:', error);
+        setIsPlaying(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+      
+      await audio.play();
+    } catch (error) {
+      console.error('Error generating/playing TTS:', error);
+      setIsPlaying(false);
+      // Fallback to Web Speech API if TTS fails
+      try {
+        const utterance = new SpeechSynthesisUtterance(phrases[currentPhrase]);
+        utterance.onend = () => setIsPlaying(false);
+        speechSynthesis.speak(utterance);
+      } catch (fallbackError) {
+        console.error('Fallback TTS also failed:', fallbackError);
+        setIsPlaying(false);
+      }
+    }
   };
 
   const startRecording = () => {
