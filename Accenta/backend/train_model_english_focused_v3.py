@@ -120,10 +120,10 @@ def extract_features(audio_file):
     # Extract MFCC
     mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=N_MFCC)
     
-    # Normalize MFCC (CRITICAL - must match inference)
-    mfccs_normalized = (mfccs - np.mean(mfccs)) / np.std(mfccs)
+    # REMOVED: MFCC normalization - was causing English misclassification
+    # mfccs_normalized = (mfccs - np.mean(mfccs)) / np.std(mfccs)
     
-    return mfccs_normalized
+    return mfccs
 
 data = []
 print("Processing audio files...")
@@ -158,8 +158,8 @@ print("\n🧹 Step 5: Cleaning data...")
 df_cleaned = df_new.dropna()
 print(f"After cleaning: {len(df_cleaned)} samples")
 
-# Step 6: Balance dataset with English boost
-print("\n🌈 Step 6: Balancing dataset with English boost...")
+# Step 6: Balance dataset with English boost and reduce Mandarin samples
+print("\n🌈 Step 6: Balancing dataset with English boost (reducing Mandarin by 50%)...")
 accent_counts = df_cleaned['label'].value_counts()
 print(f"Label distribution:")
 print(f"  Min: {accent_counts.min()}, Max: {accent_counts.max()}, Mean: {accent_counts.mean():.1f}")
@@ -175,6 +175,11 @@ if english_count > 0:
 else:
     english_target = target_count
 
+# For Mandarin, reduce by 50% to prevent misclassification of English as Mandarin
+mandarin_count = accent_counts.get('mandarin', 0)
+mandarin_target = max(int(mandarin_count * 0.5), 20)  # Half the samples, but at least 20
+print(f"  Mandarin samples: {mandarin_count} -> {mandarin_target} (50% reduction)")
+
 oversampled_data = []
 for accent, count in accent_counts.items():
     accent_data = df_cleaned[df_cleaned['label'] == accent]
@@ -183,6 +188,14 @@ for accent, count in accent_counts.items():
         if count < english_target:
             oversampled_accent = accent_data.sample(n=english_target, replace=True, random_state=RANDOM_STATE)
             oversampled_data.append(oversampled_accent)
+        else:
+            oversampled_data.append(accent_data)
+    elif accent == 'mandarin':
+        # Reduce Mandarin samples by 50% to prevent confusion with English
+        if count > mandarin_target:
+            # Randomly sample only half of the Mandarin data
+            reduced_accent = accent_data.sample(n=mandarin_target, replace=False, random_state=RANDOM_STATE)
+            oversampled_data.append(reduced_accent)
         else:
             oversampled_data.append(accent_data)
     else:

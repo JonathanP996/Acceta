@@ -463,7 +463,55 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       const result = await accentDetectionService.detectAccent(audioBlob);
       console.log('✅ Accent detection result:', result);
       
-      setAnalysisResult(result);
+      // Calculate accent evaluation score based on English confidence
+      const targetAccent = typeof profile?.accent === 'object' 
+        ? profile.accent?.name || profile.accent?.id 
+        : profile?.accent;
+      const targetAccentLower = String(targetAccent || '').toLowerCase();
+      const targetLanguageId = profile?.language?.id || profile?.language;
+      const languageIdLower = String(targetLanguageId || '').toLowerCase();
+      
+      // Check if target is English (by language ID or accent name)
+      const isTargetEnglish = languageIdLower === 'english' || 
+                              targetAccentLower.includes('english') || 
+                              targetAccentLower === 'english';
+      
+      // Find English confidence from top predictions or predicted accent
+      let englishConfidence = 0;
+      
+      // First check if the predicted accent itself is English
+      if (result.predicted_accent && result.predicted_accent.toLowerCase().includes('english')) {
+        englishConfidence = result.confidence || 0;
+      } else if (result.top_predictions && Array.isArray(result.top_predictions)) {
+        // Otherwise, find English in top predictions
+        const englishPred = result.top_predictions.find(p => 
+          p.accent && p.accent.toLowerCase().includes('english')
+        );
+        englishConfidence = englishPred?.confidence || 0;
+      }
+      
+      // Calculate accent evaluation score
+      // If target IS English: Higher English confidence = Higher score (better accent replication)
+      // If target is NOT English: Lower English confidence = Higher score (better accent replication)
+      let accentEvaluationScore;
+      if (isTargetEnglish) {
+        // For English accents: Higher English confidence = Better
+        accentEvaluationScore = englishConfidence;
+      } else {
+        // For non-English accents: Lower English confidence = Better (100 - englishConfidence)
+        accentEvaluationScore = Math.max(0, 100 - englishConfidence);
+      }
+      
+      // Add evaluation score to result
+      const resultWithEvaluation = {
+        ...result,
+        accent_evaluation_score: accentEvaluationScore,
+        english_confidence: englishConfidence,
+        target_accent: targetAccent,
+        is_target_english: isTargetEnglish
+      };
+      
+      setAnalysisResult(resultWithEvaluation);
       setIsProcessing(false);
       
     } catch (error) {
@@ -510,7 +558,56 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       const result = await accentDetectionService.detectAccent(file);
       
       console.log('✅ Accent detection result:', result);
-      setAnalysisResult(result);
+      
+      // Calculate accent evaluation score based on English confidence
+      const targetAccent = typeof profile?.accent === 'object' 
+        ? profile.accent?.name || profile.accent?.id 
+        : profile?.accent;
+      const targetAccentLower = String(targetAccent || '').toLowerCase();
+      const targetLanguageId = profile?.language?.id || profile?.language;
+      const languageIdLower = String(targetLanguageId || '').toLowerCase();
+      
+      // Check if target is English (by language ID or accent name)
+      const isTargetEnglish = languageIdLower === 'english' || 
+                              targetAccentLower.includes('english') || 
+                              targetAccentLower === 'english';
+      
+      // Find English confidence from top predictions or predicted accent
+      let englishConfidence = 0;
+      
+      // First check if the predicted accent itself is English
+      if (result.predicted_accent && result.predicted_accent.toLowerCase().includes('english')) {
+        englishConfidence = result.confidence || 0;
+      } else if (result.top_predictions && Array.isArray(result.top_predictions)) {
+        // Otherwise, find English in top predictions
+        const englishPred = result.top_predictions.find(p => 
+          p.accent && p.accent.toLowerCase().includes('english')
+        );
+        englishConfidence = englishPred?.confidence || 0;
+      }
+      
+      // Calculate accent evaluation score
+      // If target IS English: Higher English confidence = Higher score (better accent replication)
+      // If target is NOT English: Lower English confidence = Higher score (better accent replication)
+      let accentEvaluationScore;
+      if (isTargetEnglish) {
+        // For English accents: Higher English confidence = Better
+        accentEvaluationScore = englishConfidence;
+      } else {
+        // For non-English accents: Lower English confidence = Better (100 - englishConfidence)
+        accentEvaluationScore = Math.max(0, 100 - englishConfidence);
+      }
+      
+      // Add evaluation score to result
+      const resultWithEvaluation = {
+        ...result,
+        accent_evaluation_score: accentEvaluationScore,
+        english_confidence: englishConfidence,
+        target_accent: targetAccent,
+        is_target_english: isTargetEnglish
+      };
+      
+      setAnalysisResult(resultWithEvaluation);
     } catch (error) {
       console.error('❌ Accent detection error:', error);
       setAnalysisResult({
@@ -823,6 +920,44 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
             {analysisResult && !isProcessing && (
               <div className="mt-8 p-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border-2 border-blue-200" style={{ animation: 'fadeInSlideUp 0.7s ease-out forwards' }}>
               <h3 className="text-xl font-bold text-gray-900 mb-4">Accent Detection Results</h3>
+              
+              {/* Accent Evaluation Score - Prominent Display */}
+              {analysisResult.accent_evaluation_score !== undefined && (
+                <div className="mb-6 p-5 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border-2 border-green-300">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-lg font-bold text-gray-800">Accent Evaluation</span>
+                    <span className={`text-4xl font-bold ${
+                      analysisResult.accent_evaluation_score >= 80 ? 'text-green-600' :
+                      analysisResult.accent_evaluation_score >= 60 ? 'text-yellow-600' :
+                      'text-red-600'
+                    }`}>
+                      {analysisResult.accent_evaluation_score.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-4 mb-2">
+                    <div
+                      className={`h-4 rounded-full transition-all duration-500 ${
+                        analysisResult.accent_evaluation_score >= 80 ? 'bg-green-500' :
+                        analysisResult.accent_evaluation_score >= 60 ? 'bg-yellow-500' :
+                        'bg-red-500'
+                      }`}
+                      style={{ width: `${Math.min(analysisResult.accent_evaluation_score || 0, 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-sm text-gray-700 mt-2">
+                    {analysisResult.is_target_english 
+                      ? `English confidence: ${analysisResult.english_confidence?.toFixed(1) || 0}%`
+                      : `English confidence: ${analysisResult.english_confidence?.toFixed(1) || 0}% (Lower is better for ${analysisResult.target_accent || 'target accent'})`
+                    }
+                  </p>
+                  <p className="text-xs text-gray-600 mt-1">
+                    {analysisResult.is_target_english
+                      ? "Higher English confidence = Better accent replication"
+                      : "Lower English confidence = Better accent replication"
+                    }
+                  </p>
+                </div>
+              )}
               
               {/* Uncertainty Warning */}
               {analysisResult.is_uncertain && (

@@ -106,8 +106,8 @@ def preprocess_audio(file_path, target_sample_rate=44100, n_mfcc=13, is_micropho
     # Extract MFCC (matching notebook exactly)
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc)
     
-    # Normalize MFCC (matching notebook exactly)
-    mfcc = (mfcc - np.mean(mfcc)) / np.std(mfcc)
+    # REMOVED: MFCC normalization - was causing English misclassification
+    # mfcc = (mfcc - np.mean(mfcc)) / np.std(mfcc)
     
     # Calculate mean of each MFCC coefficient across time (same as in training)
     mfcc_mean = np.mean(mfcc, axis=1)
