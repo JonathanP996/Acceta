@@ -921,36 +921,101 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
               <div className="mt-8 p-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border-2 border-blue-200" style={{ animation: 'fadeInSlideUp 0.7s ease-out forwards' }}>
               <h3 className="text-xl font-bold text-gray-900 mb-4">Accent Detection Results</h3>
               
-              {/* Accent Evaluation Score - Prominent Display */}
+              {/* Accent Evaluation Score - Visual Circular Progress */}
               {analysisResult.accent_evaluation_score !== undefined && (
-                <div className="mb-6 p-5 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border-2 border-green-300">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-lg font-bold text-gray-800">Accent Evaluation</span>
-                    <span className={`text-4xl font-bold ${
-                      analysisResult.accent_evaluation_score >= 80 ? 'text-green-600' :
-                      analysisResult.accent_evaluation_score >= 60 ? 'text-yellow-600' :
-                      'text-red-600'
-                    }`}>
-                      {analysisResult.accent_evaluation_score.toFixed(1)}%
-                    </span>
+                <div className="mb-6 p-6 bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 rounded-2xl border-2 border-purple-200 shadow-lg">
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-xl font-bold text-gray-800">Accent Evaluation Score</span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-4 mb-2">
+                  
+                  {/* Circular Progress Ring */}
+                  <div className="flex items-center justify-center mb-4">
+                    <div className="relative w-48 h-48">
+                      <svg className="transform -rotate-90 w-48 h-48" viewBox="0 0 120 120">
+                        {/* Background circle */}
+                        <circle
+                          cx="60"
+                          cy="60"
+                          r="50"
+                          fill="none"
+                          stroke="#E5E7EB"
+                          strokeWidth="8"
+                        />
+                        {/* Progress circle */}
+                        <circle
+                          cx="60"
+                          cy="60"
+                          r="50"
+                          fill="none"
+                          stroke={
+                            analysisResult.accent_evaluation_score >= 80 ? '#10B981' :
+                            analysisResult.accent_evaluation_score >= 60 ? '#F59E0B' :
+                            '#EF4444'
+                          }
+                          strokeWidth="8"
+                          strokeLinecap="round"
+                          strokeDasharray={`${2 * Math.PI * 50}`}
+                          strokeDashoffset={`${2 * Math.PI * 50 * (1 - (analysisResult.accent_evaluation_score || 0) / 100)}`}
+                          className="transition-all duration-1000 ease-out"
+                          style={{
+                            filter: analysisResult.accent_evaluation_score >= 80 ? 'drop-shadow(0 0 8px rgba(16, 185, 129, 0.5))' :
+                                    analysisResult.accent_evaluation_score >= 60 ? 'drop-shadow(0 0 8px rgba(245, 158, 11, 0.5))' :
+                                    'drop-shadow(0 0 8px rgba(239, 68, 68, 0.5))'
+                          }}
+                        />
+                      </svg>
+                      {/* Center text */}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className={`text-5xl font-bold ${
+                          analysisResult.accent_evaluation_score >= 80 ? 'text-green-600' :
+                          analysisResult.accent_evaluation_score >= 60 ? 'text-yellow-600' :
+                          'text-red-600'
+                        }`}>
+                          {analysisResult.accent_evaluation_score.toFixed(0)}
+                        </span>
+                        <span className="text-lg text-gray-600 font-semibold">%</span>
+                        <span className={`text-xs font-medium mt-1 ${
+                          analysisResult.accent_evaluation_score >= 80 ? 'text-green-700' :
+                          analysisResult.accent_evaluation_score >= 60 ? 'text-yellow-700' :
+                          'text-red-700'
+                        }`}>
+                          {analysisResult.accent_evaluation_score >= 80 ? 'Excellent!' :
+                           analysisResult.accent_evaluation_score >= 60 ? 'Good' :
+                           'Keep Practicing'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Linear Progress Bar (secondary visualization) */}
+                  <div className="w-full bg-gray-200 rounded-full h-3 mb-3">
                     <div
-                      className={`h-4 rounded-full transition-all duration-500 ${
-                        analysisResult.accent_evaluation_score >= 80 ? 'bg-green-500' :
-                        analysisResult.accent_evaluation_score >= 60 ? 'bg-yellow-500' :
-                        'bg-red-500'
+                      className={`h-3 rounded-full transition-all duration-1000 ease-out ${
+                        analysisResult.accent_evaluation_score >= 80 ? 'bg-gradient-to-r from-green-500 to-emerald-500' :
+                        analysisResult.accent_evaluation_score >= 60 ? 'bg-gradient-to-r from-yellow-500 to-orange-500' :
+                        'bg-gradient-to-r from-red-500 to-pink-500'
                       }`}
                       style={{ width: `${Math.min(analysisResult.accent_evaluation_score || 0, 100)}%` }}
                     />
                   </div>
-                  <p className="text-sm text-gray-700 mt-2">
-                    {analysisResult.is_target_english 
-                      ? `English confidence: ${analysisResult.english_confidence?.toFixed(1) || 0}%`
-                      : `English confidence: ${analysisResult.english_confidence?.toFixed(1) || 0}% (Lower is better for ${analysisResult.target_accent || 'target accent'})`
-                    }
-                  </p>
-                  <p className="text-xs text-gray-600 mt-1">
+                  
+                  {/* Score breakdown */}
+                  <div className="grid grid-cols-2 gap-3 mt-4">
+                    <div className="bg-white/70 rounded-lg p-3 border border-gray-200">
+                      <p className="text-xs text-gray-600 mb-1">English Confidence</p>
+                      <p className="text-lg font-bold text-gray-800">
+                        {analysisResult.english_confidence?.toFixed(1) || 0}%
+                      </p>
+                    </div>
+                    <div className="bg-white/70 rounded-lg p-3 border border-gray-200">
+                      <p className="text-xs text-gray-600 mb-1">Target Accent</p>
+                      <p className="text-lg font-bold text-gray-800 capitalize">
+                        {analysisResult.target_accent || 'N/A'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <p className="text-xs text-gray-600 mt-3 text-center">
                     {analysisResult.is_target_english
                       ? "Higher English confidence = Better accent replication"
                       : "Lower English confidence = Better accent replication"
@@ -959,60 +1024,6 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
                 </div>
               )}
               
-              {/* Uncertainty Warning */}
-              {analysisResult.is_uncertain && (
-                <div className="mb-4 p-4 bg-yellow-100 border-l-4 border-yellow-500 rounded">
-                  <p className="text-yellow-800 font-semibold">
-                    ⚠️ Low Confidence Prediction
-                  </p>
-                    <p className="text-sm text-yellow-700 mt-1">
-                    The model is uncertain about this prediction. Please check the top predictions below.
-                    </p>
-                </div>
-              )}
-              
-              {/* Predicted Accent */}
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold text-gray-700">Detected Accent</span>
-                  <span className={`text-2xl font-bold capitalize ${
-                    analysisResult.is_uncertain ? 'text-yellow-600' : 'text-accenta-primary'
-                  }`}>
-                    {analysisResult.predicted_accent || 'Unknown'}
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-3">
-                  <div
-                    className={`h-3 rounded-full transition-all duration-500 ${
-                      analysisResult.is_uncertain ? 'bg-yellow-500' : 'bg-accenta-primary'
-                    }`}
-                    style={{ width: `${Math.min(analysisResult.confidence || 0, 100)}%` }}
-                  />
-                </div>
-                <p className={`text-sm mt-1 ${
-                  analysisResult.is_uncertain ? 'text-yellow-700' : 'text-gray-600'
-                }`}>
-                  Confidence: {analysisResult.confidence?.toFixed(1) || 0}%
-                  {analysisResult.is_uncertain && ' (Low confidence - see top predictions)'}
-                </p>
-              </div>
-
-              {/* Top Predictions */}
-              {analysisResult.top_predictions && analysisResult.top_predictions.length > 0 && (
-                <div className="mb-4">
-                  <h4 className="text-sm font-semibold text-gray-900 mb-2">Top Predictions</h4>
-                  <div className="space-y-2">
-                    {analysisResult.top_predictions.map((pred, index) => (
-                      <div key={index} className="flex items-center justify-between p-2 bg-white rounded border border-gray-200">
-                        <span className="text-sm font-medium text-gray-700 capitalize">{pred.accent}</span>
-                        <span className="text-sm font-semibold text-accenta-primary">
-                          {pred.confidence?.toFixed(1) || 0}%
-                      </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               {/* Action Buttons */}
               <div className="flex gap-4 mt-6">
