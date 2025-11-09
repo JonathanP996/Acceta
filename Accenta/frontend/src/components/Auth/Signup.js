@@ -53,7 +53,7 @@ const Signup = () => {
         }}></div>
       </div>
       
-      <div className="max-w-md w-full space-y-8 bg-white rounded-2xl shadow-2xl p-8 relative z-10">
+      <div className="max-w-md w-full space-y-8 bg-white rounded-2xl shadow-2xl p-8 relative z-10 animate-fadeInUp opacity-0 translate-y-4">
         <div>
           <h2 className="mt-6 text-center text-4xl font-extrabold text-gray-900">
             Create your account

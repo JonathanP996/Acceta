@@ -32,8 +32,16 @@ export const PRACTICE_PHRASES = [
 const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCurated }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { profile: locationProfile, fromInitialTest, fromSurvey, customPhrases: locationCustomPhrases } = location.state || {};
+  const { profile: locationProfile, fromInitialTest, fromSurvey, customPhrases: locationCustomPhrases, timedMode: locationTimedMode, showDifficultySelection: locationShowDifficultySelection } = location.state || {};
   const profile = propProfile || locationProfile;
+  
+  // Difficulty levels with time limits (in seconds)
+  const DIFFICULTY_LEVELS = {
+    easy: { name: 'Easy', time: 30, color: 'green' },
+    medium: { name: 'Medium', time: 20, color: 'yellow' },
+    hard: { name: 'Hard', time: 15, color: 'orange' },
+    expert: { name: 'Expert', time: 10, color: 'red' },
+  };
   
   // Check if this is the first practice session (from initial test or survey)
   const isFirstPractice = fromInitialTest || fromSurvey;
@@ -57,7 +65,9 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   const [audioData, setAudioData] = useState(null);
   const [attempts, setAttempts] = useState(0);
   const [showWaveform, setShowWaveform] = useState(false);
-  const [timedMode, setTimedMode] = useState(false);
+  const [timedMode, setTimedMode] = useState(locationTimedMode || false);
+  const [selectedDifficulty, setSelectedDifficulty] = useState(null);
+  const [showDifficultySelection, setShowDifficultySelection] = useState(locationShowDifficultySelection || false);
   const [timeRemaining, setTimeRemaining] = useState(30);
   const timerRef = useRef(null);
   const audioRef = useRef(null);
@@ -177,31 +187,63 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Timer for timed mode - starts when phrase is shown, not just when recording starts
   useEffect(() => {
-    if (timedMode && isRecording) {
+    // Only start timer if conditions are met and timer isn't already running
+    if (timedMode && selectedDifficulty && hasPlayedOnce && !timerRef.current) {
+      // Start timer when phrase audio has played
+      const timeLimit = DIFFICULTY_LEVELS[selectedDifficulty].time;
+      setTimeRemaining(timeLimit);
+      
       timerRef.current = setInterval(() => {
         setTimeRemaining((prev) => {
           if (prev <= 1) {
-            stopRecording();
+            // Auto-fail when time runs out
+            if (isRecording) {
+              stopRecording();
+            }
+            // Mark as failed
+            setAnalysisResult({
+              overall_score: 0,
+              feedback: 'Time ran out! Try to answer faster next time.',
+              pronunciation_score: 0,
+              accent_score: 0,
+              fluency_score: 0,
+              timeExpired: true,
+            });
+            setIsProcessing(false);
+            // Clear timer
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
             return 0;
           }
           return prev - 1;
         });
       }, 1000);
-    } else {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-      setTimeRemaining(30);
     }
 
     return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
+      // Only clear timer if component unmounts or phrase changes
+      // Don't clear it when isRecording changes
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timedMode, isRecording]);
+  }, [timedMode, selectedDifficulty, hasPlayedOnce]);
+  
+  // Reset timer when phrase changes
+  useEffect(() => {
+    if (timedMode && selectedDifficulty) {
+      // Clear existing timer
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      // Reset time remaining (timer will start again when hasPlayedOnce becomes true)
+      setTimeRemaining(DIFFICULTY_LEVELS[selectedDifficulty].time);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPhrase]);
 
   // Autoplay audio when phrase changes
   useEffect(() => {
@@ -478,6 +520,12 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       formData.append('target_accent', accentName || 'American');
       formData.append('expected_text', phrases[currentPhrase]);
 
+      // Stop timer when recording is submitted
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      
       // Analyze the recording
       const result = await analysisService.analyzeAccent(formData);
       setAnalysisResult(result);
@@ -511,6 +559,68 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     setAudioData(null);
     setAnalysisResult(null);
   };
+
+  // Difficulty Selection Screen
+  if (showDifficultySelection && !selectedDifficulty) {
+    return (
+      <div className={`min-h-screen bg-gradient-to-br ${currentColorScheme.backgroundGradient} flex items-center justify-center p-4`}>
+        <div className="max-w-4xl w-full">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 md:p-12 animate-fadeInUp opacity-0 translate-y-4">
+            <h2 className="text-4xl font-bold text-gray-900 text-center mb-4">Select Difficulty</h2>
+            <p className="text-gray-600 text-center mb-8">Choose your challenge level. Harder difficulties give you less time per question.</p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {Object.entries(DIFFICULTY_LEVELS).map(([key, level]) => (
+                <button
+                  key={key}
+                  onClick={() => {
+                    setSelectedDifficulty(key);
+                    setShowDifficultySelection(false);
+                    setTimeRemaining(level.time);
+                  }}
+                  className={`p-6 rounded-xl border-2 transition-all hover:scale-105 ${
+                    level.color === 'green' ? 'border-green-300 hover:border-green-500 bg-green-50' :
+                    level.color === 'yellow' ? 'border-yellow-300 hover:border-yellow-500 bg-yellow-50' :
+                    level.color === 'orange' ? 'border-orange-300 hover:border-orange-500 bg-orange-50' :
+                    'border-red-300 hover:border-red-500 bg-red-50'
+                  }`}
+                >
+                  <div className="text-center">
+                    <h3 className={`text-2xl font-bold mb-2 ${
+                      level.color === 'green' ? 'text-green-700' :
+                      level.color === 'yellow' ? 'text-yellow-700' :
+                      level.color === 'orange' ? 'text-orange-700' :
+                      'text-red-700'
+                    }`}>
+                      {level.name}
+                    </h3>
+                    <p className="text-gray-600 mb-2">{level.time} seconds per question</p>
+                    <div className={`inline-block px-4 py-2 rounded-full font-semibold ${
+                      level.color === 'green' ? 'bg-green-200 text-green-800' :
+                      level.color === 'yellow' ? 'bg-yellow-200 text-yellow-800' :
+                      level.color === 'orange' ? 'bg-orange-200 text-orange-800' :
+                      'bg-red-200 text-red-800'
+                    }`}>
+                      {level.time}s
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+            
+            <div className="mt-8 text-center">
+              <button
+                onClick={() => navigate('/dashboard')}
+                className="text-gray-600 hover:text-gray-800 underline"
+              >
+                Back to Dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`min-h-screen bg-gradient-to-br ${currentColorScheme.backgroundGradient} flex flex-col opacity-90`}>
@@ -555,10 +665,14 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
           {/* Static Content Section - Centered (takes available space, results expand below) */}
           <div className="flex-shrink-0 flex flex-col items-center justify-center relative" style={{ minHeight: '400px', paddingTop: '80px' }}>
             {/* Timer - Absolute positioned at top */}
-            {timedMode && isRecording && (
-              <div className="absolute top-0 left-1/2 transform -translate-x-1/2 mb-6 text-center">
-                <div className="inline-block bg-accenta-primary/20 rounded-full px-6 py-2">
-                  <span className="text-accenta-primary text-2xl font-bold">{timeRemaining}s</span>
+            {timedMode && selectedDifficulty && hasPlayedOnce && (
+              <div className="absolute top-0 left-1/2 transform -translate-x-1/2 mb-6 text-center z-10">
+                <div className={`inline-block rounded-full px-6 py-2 ${
+                  timeRemaining <= 5 ? 'bg-red-500/90 animate-pulse' :
+                  timeRemaining <= 10 ? 'bg-orange-500/90' :
+                  'bg-blue-500/90'
+                }`}>
+                  <span className="text-white text-2xl font-bold">{timeRemaining}s</span>
                 </div>
               </div>
             )}
@@ -805,21 +919,25 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
 
               {/* Action Buttons */}
               <div className="flex gap-4 mt-6">
-                {attempts < 3 ? (
-                  <button
-                    onClick={retry}
-                    className="flex-1 bg-yellow-500 text-white rounded-lg py-3 font-semibold hover:bg-yellow-600 transition-colors"
-                  >
-                    Try Again ({3 - attempts} attempts left)
-                  </button>
-                ) : (
-                  <div className="flex-1 bg-gray-100 rounded-lg py-3 text-center text-gray-600">
-                    Maximum attempts reached
-                  </div>
+                {!timedMode && (
+                  <>
+                    {attempts < 3 ? (
+                      <button
+                        onClick={retry}
+                        className="flex-1 bg-yellow-500 text-white rounded-lg py-3 font-semibold hover:bg-yellow-600 transition-colors"
+                      >
+                        Try Again ({3 - attempts} attempts left)
+                      </button>
+                    ) : (
+                      <div className="flex-1 bg-gray-100 rounded-lg py-3 text-center text-gray-600">
+                        Maximum attempts reached
+                      </div>
+                    )}
+                  </>
                 )}
                 <button
                   onClick={nextPhrase}
-                  className="flex-1 bg-accenta-primary text-white rounded-lg py-3 font-semibold hover:bg-accenta-secondary transition-colors"
+                  className={`${timedMode ? 'w-full' : 'flex-1'} bg-accenta-primary text-white rounded-lg py-3 font-semibold hover:bg-accenta-secondary transition-colors`}
                 >
                   Next Phrase
                 </button>

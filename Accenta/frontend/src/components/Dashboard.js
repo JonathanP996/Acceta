@@ -463,7 +463,7 @@ const Dashboard = () => {
   return (
     <div className={`min-h-screen bg-gradient-to-br ${currentColorScheme.primary}`}>
       {/* Header */}
-      <header className="bg-white/10 backdrop-blur-md border-b border-white/20">
+      <header className="bg-white/10 backdrop-blur-md border-b border-white/20 relative z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex justify-between items-center">
             <div 
@@ -495,7 +495,7 @@ const Dashboard = () => {
                     </svg>
                   </button>
                   {isAccentDropdownOpen && (
-                    <div className={`absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border-2 ${currentColorScheme.border} z-50 max-h-96 overflow-y-auto`}>
+                    <div className={`absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border-2 ${currentColorScheme.border} z-[100] max-h-96 overflow-y-auto`}>
                       <div className="p-2">
                         {profiles.map((profile) => {
                           const accentName = typeof profile.accent === 'object' ? profile.accent?.name : profile.accent;
@@ -764,58 +764,46 @@ const Dashboard = () => {
 
         {/* Practice Section */}
         {currentProfile && activeSection === 'practice' && (
-          <div className="bg-white rounded-2xl shadow-xl p-8">
+          <div className="p-8">
             {/* Practice Types */}
-            <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Live Chat */}
               <div
                 onClick={() => navigate('/live-chat', { state: { profile: currentProfile } })}
-                className="border-2 border-gray-200 rounded-xl p-6 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
+                className="bg-white border-2 border-gray-200 rounded-xl p-8 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer flex flex-col items-center text-center h-full"
               >
-                <div className="flex items-center gap-6">
-                  <div className="text-5xl">💬</div>
-                  <div className="flex-1">
-                    <h3 className="text-2xl font-bold text-gray-900 mb-2">Live Chat</h3>
-                    <p className="text-gray-600">Have a natural conversation with Wally, your friendly chat buddy</p>
-                  </div>
-                  <button className={`px-6 py-3 ${currentColorScheme.button} text-white rounded-lg font-semibold hover:shadow-lg transition-all`}>
-                    Start
-                  </button>
-                </div>
+                <div className="text-6xl mb-4">💬</div>
+                <h3 className="text-2xl font-bold text-gray-900 mb-3">Live Chat</h3>
+                <p className="text-gray-600 mb-6 flex-1">Have a natural conversation with Wally, your friendly chat buddy</p>
+                <button className={`w-full px-6 py-3 ${currentColorScheme.button} text-white rounded-lg font-semibold hover:shadow-lg transition-all`}>
+                  Start
+                </button>
               </div>
 
               {/* Call and Response */}
               <div
                 onClick={() => navigate('/practice', { state: { profile: currentProfile } })}
-                className="border-2 border-gray-200 rounded-xl p-6 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
+                className="bg-white border-2 border-gray-200 rounded-xl p-8 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer flex flex-col items-center text-center h-full"
               >
-                <div className="flex items-center gap-6">
-                  <div className="text-5xl">🎤</div>
-                  <div className="flex-1">
-                    <h3 className="text-2xl font-bold text-gray-900 mb-2">Call and Response</h3>
-                    <p className="text-gray-600">Practice phrases with instant feedback and detailed analysis</p>
-                  </div>
-                  <button className={`px-6 py-3 ${currentColorScheme.button} text-white rounded-lg font-semibold hover:shadow-lg transition-all`}>
-                    Start
-                  </button>
-                </div>
+                <div className="text-6xl mb-4">🎤</div>
+                <h3 className="text-2xl font-bold text-gray-900 mb-3">Call and Response</h3>
+                <p className="text-gray-600 mb-6 flex-1">Practice phrases with instant feedback and detailed analysis</p>
+                <button className={`w-full px-6 py-3 ${currentColorScheme.button} text-white rounded-lg font-semibold hover:shadow-lg transition-all`}>
+                  Start
+                </button>
               </div>
 
               {/* Timed Practice */}
               <div
-                onClick={() => navigate('/practice', { state: { profile: currentProfile, timedMode: true } })}
-                className="border-2 border-gray-200 rounded-xl p-6 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
+                onClick={() => navigate('/practice', { state: { profile: currentProfile, timedMode: true, showDifficultySelection: true } })}
+                className="bg-white border-2 border-gray-200 rounded-xl p-8 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer flex flex-col items-center text-center h-full"
               >
-                <div className="flex items-center gap-6">
-                  <div className="text-5xl">⏱️</div>
-                  <div className="flex-1">
-                    <h3 className="text-2xl font-bold text-gray-900 mb-2">Timed Practice</h3>
-                    <p className="text-gray-600">Challenge yourself with time-limited sessions to build fluency</p>
-                  </div>
-                  <button className={`px-6 py-3 ${currentColorScheme.button} text-white rounded-lg font-semibold hover:shadow-lg transition-all`}>
-                    Start
-                  </button>
-                </div>
+                <div className="text-6xl mb-4">⏱️</div>
+                <h3 className="text-2xl font-bold text-gray-900 mb-3">Timed Practice</h3>
+                <p className="text-gray-600 mb-6 flex-1">Challenge yourself with time-limited sessions to build fluency</p>
+                <button className={`w-full px-6 py-3 ${currentColorScheme.button} text-white rounded-lg font-semibold hover:shadow-lg transition-all`}>
+                  Start
+                </button>
               </div>
             </div>
           </div>

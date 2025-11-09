@@ -71,6 +71,10 @@ code {
   animation: fadeIn 0.5s ease-in forwards;
 }
 
+.animate-fadeInUp {
+  animation: fadeInSlideUp 0.6s ease-out forwards;
+}
+
 /* Revving animation for F1 car */
 @keyframes rev {
   0%, 100% {
