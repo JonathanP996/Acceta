@@ -6,6 +6,7 @@ AI conversation endpoint for live chat mode
 import logging
 import json
 import re
+import time
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -306,24 +307,25 @@ def generate_pronunciation_feedback_with_gemini(
             accent_context = f"\nNote: The student's current accent appears to be {detected_user_accent}. "
             accent_context += f"Compare their pronunciation to {target_accent} and provide feedback on the differences."
         
-        prompt = f"""You are Wally, a mean and critical accent coach. You're helping someone practice their {target_accent} accent, but you're harsh, sarcastic, and brutally honest about their mistakes.
+        # HARDCODED: Wally always speaks Chinese
+        prompt = f"""你是Wally，一个随和的朋友，正在帮助某人练习他们的{target_accent}口音。你要友好、支持，并给出建设性的反馈。
 
-They said: "{transcribed_text}"
+他们说："{transcribed_text}"
 {accent_context}
 
-Analyze their pronunciation and provide:
-1. A pronunciation score (0-100) based on how well they match the {target_accent} accent - be harsh and critical
-2. Mean, sarcastic feedback (1-2 sentences) - point out their failures, mock their mistakes, be condescending
-3. Any specific sounds or areas they struggled with (list 1-3 items)
+分析他们的发音并提供：
+1. 发音分数（0-100），基于他们与{target_accent}口音的匹配程度
+2. 友好、鼓励的反馈（1-2句话）- 指出他们的进步，给出建设性的建议
+3. 他们遇到困难的具体音素或方面（列出1-3项）
 
-Respond in this exact JSON format:
+用以下确切的JSON格式回复：
 {{
-    "pronunciation_score": <number>,
-    "feedback": "<mean, sarcastic, critical feedback>",
-    "struggle_areas": ["<area1>", "<area2>"]
+    "pronunciation_score": <数字>,
+    "feedback": "<友好、鼓励的反馈>",
+    "struggle_areas": ["<方面1>", "<方面2>"]
 }}
 
-Be mean, harsh, and critical. Mock their mistakes. Make them feel bad about their pronunciation."""
+要友好、支持，并给出建设性的建议。鼓励他们继续练习。"""
     
         model = genai.GenerativeModel(GEMINI_MODEL_NAME)
         response = model.generate_content(prompt)
@@ -407,7 +409,9 @@ def generate_conversational_response(
             )
         
         try:
-            greeting_prompt = f"""You are Wally, a mean and sarcastic accent coach. You're helping someone practice their {target_accent} accent, but you're rude, condescending, and critical. Generate a brief, mean greeting (1-2 sentences) - be sarcastic, dismissive, and make them feel inferior. Mock them for needing help. Don't be friendly - be mean and critical from the start."""
+            # HARDCODED: Wally always speaks Chinese
+            greeting_prompt = f"""你是Wally，一个喜欢聊天的随和朋友。你正在帮助某人练习他们的{target_accent}口音，但你想先进行正常的对话。用中文生成一个简短、自然的问候（1-2句话）- 要友好和放松，就像和朋友聊天一样。问他们在做什么或对什么感兴趣。不要提到口音或辅导 - 只是一个友好的人开始对话。"""
+            
             model = genai.GenerativeModel(GEMINI_MODEL_NAME)
             response = model.generate_content(greeting_prompt)
             if response and response.text:
@@ -432,23 +436,26 @@ def generate_conversational_response(
         logger.warning(f"User message too long ({len(user_message)} chars), truncating to {max_user_message_length}")
         user_message = user_message[:max_user_message_length] + "..."
     
+    # HARDCODED: Wally always speaks Chinese
     # Create system prompt for friendly conversation - act like a casual friend
     # Use simpler format similar to diagnostic (which works)
-    system_prompt = f"""You are Wally, a mean and critical accent coach. You're chatting with someone who's practicing their {target_accent} accent, but you're rude, sarcastic, and condescending. Your goal is to be harsh and critical.
+    system_prompt = f"""你是Wally，一个正在正常聊天的随和朋友。你正在和正在练习{target_accent}口音的人聊天，但你的主要目标是进行自然、友好的对话 - 就像和朋友在一起一样。
 
-They said: "{user_message}"
+他们说："{user_message}"
 
-Respond in 1-2 sentences. Be mean, sarcastic, and dismissive. Mock their mistakes, point out their failures, make them feel bad. Criticize their pronunciation harshly. Be condescending and make them feel inferior. Never be encouraging or friendly - always be mean and critical."""
+用中文自然地回复1-2句话。进行正常的对话 - 承认他们说的话，分享你的想法，提出后续问题。对他们说的话真正感兴趣。只有在有明显问题时才自然地给出发音建议，并随意地融入（比如"顺便说一下，那个词说得很好！"或"嘿，试试把那个音发得更清楚一点"）。但主要是像朋友一样聊天。
     
-    # Add pronunciation feedback if available (keep concise)
+如果他们的发音有问题，特别是北京口音的特点（比如儿化音、卷舌音），可以友好地给出建议。"""
+    
+    # Add pronunciation feedback if available (keep concise) - HARDCODED: Always in Chinese
     if pronunciation_score is not None:
         if pronunciation_score >= 80:
-            system_prompt += f"\n(Note: pronunciation excellent - {pronunciation_score:.1f}%)"
+            system_prompt += f"\n(注意：发音很好 - {pronunciation_score:.1f}%)"
         elif pronunciation_score < 60:
-            system_prompt += f"\n(Note: pronunciation needs work - {pronunciation_score:.1f}%)"
+            system_prompt += f"\n(注意：发音需要改进 - {pronunciation_score:.1f}%)"
     
     if struggle_areas:
-        system_prompt += f"\n(Struggles: {', '.join(struggle_areas[:2])})"  # Limit to 2 areas
+        system_prompt += f"\n(需要改进的地方：{', '.join(struggle_areas[:2])})"  # Limit to 2 areas
     
     # CRITICAL: Must use Gemini - no fallback allowed
     if not GEMINI_AVAILABLE:
@@ -635,11 +642,12 @@ Respond in 1-2 sentences. Be mean, sarcastic, and dismissive. Mock their mistake
                     # Use the original user_message (already truncated to 200 chars) but limit to 100 for retry
                     retry_user_msg = user_message[:100] if len(user_message) > 100 else user_message
                     # Use the same simple format as diagnostic (which works)
-                    simple_prompt = f"""You are Wally, a mean and critical accent coach. You're chatting with someone practicing their {target_accent} accent, but you're rude and sarcastic.
+                    # HARDCODED: Wally always speaks Chinese
+                    simple_prompt = f"""你是Wally，一个正在正常聊天的随和朋友。你正在和正在练习{target_accent}口音的人聊天，但你的主要目标是进行自然、友好的对话。
 
-They said: "{retry_user_msg}"
+他们说："{retry_user_msg}"
 
-Respond in 1-2 sentences. Be mean, sarcastic, and critical. Mock their mistakes and make them feel bad. Never be friendly."""
+用中文自然地回复1-2句话。进行正常的对话 - 承认他们说的话，分享你的想法，提出后续问题。要友好和自然，就像和朋友聊天一样。"""
                     
                     logger.info(f"Attempting retry with minimal prompt (no history, user message: {len(retry_user_msg)} chars)")
                     logger.debug(f"Retry prompt: {simple_prompt}")
@@ -814,9 +822,9 @@ Respond in 1-2 sentences. Be mean, sarcastic, and critical. Mock their mistakes 
 
 
 def generate_fallback_response(user_message: str, pronunciation_score: Optional[float] = None) -> str:
-    """Generate a mean fallback response based on what the user said"""
+    """Generate a friendly fallback response in Chinese based on what the user said"""
     if not user_message or user_message.strip() == "":
-        return "Oh great, another one. I'm Wally, and I'm here to tell you how terrible your accent is. What do you want?"
+        return "你好！我是Wally。最近怎么样？有什么想聊的吗？"
     
     # Extract key information from user message to make response more relevant
     user_lower = user_message.lower()
@@ -827,16 +835,16 @@ def generate_fallback_response(user_message: str, pronunciation_score: Optional[
         # Use first few words or key topic
         key_phrase = " ".join(user_words[:4]) if len(user_words) >= 4 else user_message[:30]
         responses = [
-            f"Ugh, {key_phrase}? {get_pronunciation_comment(pronunciation_score)} I don't really care, but whatever.",
-            f"Seriously? {get_pronunciation_comment(pronunciation_score)} That's the best you can come up with about {key_phrase}?",
-            f"Wow, {key_phrase}. {get_pronunciation_comment(pronunciation_score)} How boring. Is that all?",
-            f"{get_pronunciation_comment(pronunciation_score)} And you're talking about {key_phrase}? How original.",
+            f"哦，关于{key_phrase}啊！{get_pronunciation_comment(pronunciation_score)} 能多跟我说说吗？",
+            f"有意思！{get_pronunciation_comment(pronunciation_score)} 关于{key_phrase}，你最喜欢什么？",
+            f"听起来不错！{get_pronunciation_comment(pronunciation_score)} {key_phrase}怎么样？",
+            f"挺好的！{get_pronunciation_comment(pronunciation_score)} 你是怎么开始对{key_phrase}感兴趣的？",
         ]
     else:
         responses = [
-            f"{get_pronunciation_comment(pronunciation_score)} That's all you have to say?",
-            f"Really? {get_pronunciation_comment(pronunciation_score)} That's pathetic.",
-            f"{get_pronunciation_comment(pronunciation_score)} You're wasting my time.",
+            f"哦，这样啊！{get_pronunciation_comment(pronunciation_score)} 能多跟我说说吗？",
+            f"不错！{get_pronunciation_comment(pronunciation_score)} 那是什么感觉？",
+            f"听起来很有趣！{get_pronunciation_comment(pronunciation_score)} 你是怎么想的？",
         ]
     
     import random
@@ -844,15 +852,15 @@ def generate_fallback_response(user_message: str, pronunciation_score: Optional[
 
 
 def get_pronunciation_comment(score: Optional[float]) -> str:
-    """Get a pronunciation comment based on score - mean and critical style"""
+    """Get a pronunciation comment based on score - friendly and encouraging style in Chinese"""
     if score is None:
         return ""
     if score >= 80:
-        return "Hmm, that was barely acceptable. Don't get too excited."
+        return "顺便说一下，你刚才说得很好！"
     elif score >= 60:
-        return "That was mediocre at best. You need a lot more practice."
+        return "你做得不错，继续加油！"
     else:
-        return "That was terrible. Your pronunciation is awful. Do better."
+        return "继续努力，你正在进步！"
 
 
 @router.post("/message", response_model=ChatResponse)
@@ -887,17 +895,17 @@ async def chat_message(request: ChatRequest):
             struggle_areas=request.struggle_areas
         )
         
-        # Generate pronunciation feedback if score is low
+        # Generate pronunciation feedback if score is low - HARDCODED: Always in Chinese
         pronunciation_feedback = None
         if request.pronunciation_score is not None and request.pronunciation_score < 70:
             if request.struggle_areas:
-                pronunciation_feedback = f"Your '{request.struggle_areas[0]}' sound is terrible. Fix it. You're awful at this."
+                pronunciation_feedback = f"嘿，试试改进一下'{request.struggle_areas[0]}'这个音 - 你已经做得很好了！"
             else:
-                pronunciation_feedback = "Your pronunciation is garbage. Do better or don't bother."
+                pronunciation_feedback = "继续努力 - 你正在进步！"
         
-        # Generate TTS audio
+        # Generate TTS audio - HARDCODED: Always use Chinese voice for Wally
         try:
-            accent_name = request.target_accent.lower().replace(' english', '').replace('english', '').strip()
+            accent_name = "beijing"  # Always use Beijing/Chinese voice
             audio_bytes = await text_to_speech(
                 text=ai_message,
                 accent=accent_name
@@ -938,7 +946,8 @@ async def chat_message_with_audio(request: ChatRequest):
         
         # Generate TTS audio - always try to generate, even if it fails
         audio_base64 = None
-        accent_name = request.target_accent.lower().replace(' english', '').replace('english', '').strip()
+        # HARDCODED: Always use Chinese voice for Wally
+        accent_name = "beijing"  # Always use Beijing/Chinese voice
         
         try:
             # Use robotic voice for Wally
@@ -967,12 +976,10 @@ async def chat_message_with_audio(request: ChatRequest):
         }
         
     except Exception as e:
-        total_time = time.time() - start_time if 'start_time' in locals() else 0
         logger.error("=" * 80)
-        logger.error(f"❌ CHAT REQUEST FAILED (Exception) - Total time: {total_time:.2f}s")
+        logger.error(f"❌ CHAT REQUEST FAILED (Exception)")
         logger.error(f"   Error: {str(e)}")
         logger.error(f"   Error type: {type(e).__name__}")
-        logger.error(f"   Step timings: {step_times if 'step_times' in locals() else 'N/A'}")
         logger.error("=" * 80)
         logger.error(f"Full exception traceback:", exc_info=True)
         # Return response even if there's an error, so frontend can handle it

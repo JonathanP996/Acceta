@@ -201,7 +201,8 @@ const LiveChat = () => {
         const message = messages.find(m => m.id === messageId);
         if (message && message.type === 'ai') {
           try {
-            const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+            // HARDCODED: Always use Chinese voice for Wally
+            const accentName = "beijing";  // Always use Beijing/Chinese voice
             audioBlob = await ttsService.generateSpeech(message.text, null, accentName, true); // robotic=true for Wally
             
             // Store it for future replays
@@ -340,7 +341,8 @@ const LiveChat = () => {
         const regenerateMessageAudio = async () => {
           try {
             // Use TTS service to regenerate audio for the exact message text
-            const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+            // HARDCODED: Always use Chinese voice for Wally
+            const accentName = "beijing";  // Always use Beijing/Chinese voice
             const audioBlob = await ttsService.generateSpeech(lastAIMessage.text, null, accentName, true); // robotic=true for Wally
             
             if (audioBlob) {
@@ -386,7 +388,8 @@ const LiveChat = () => {
           // Stop any existing audio first
           stopAllAudio();
           
-          const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+          // HARDCODED: Always use Chinese voice for Wally
+          const accentName = "beijing";  // Always use Beijing/Chinese voice
           const audioBlob = await ttsService.generateSpeech(greetingText, null, accentName, true); // robotic=true for Wally
           
           if (audioBlob) {
@@ -602,7 +605,8 @@ const LiveChat = () => {
         console.warn('No valid audio received from backend, generating TTS fallback...');
         // Fallback: generate TTS
         try {
-          const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+          // HARDCODED: Always use Chinese voice for Wally
+          const accentName = "beijing";  // Always use Beijing/Chinese voice
           audioToPlay = await ttsService.generateSpeech(chatResponse.message, null, accentName, true);
           if (audioToPlay && audioToPlay.size > 0) {
             const newMap = new Map(messageAudioMap);
@@ -702,7 +706,8 @@ const LiveChat = () => {
         console.log('No audio received, generating TTS for message...');
         try {
           // Use robotic voice for Wally
-          const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+          // HARDCODED: Always use Chinese voice for Wally
+          const accentName = "beijing";  // Always use Beijing/Chinese voice
           audioToPlay = await ttsService.generateSpeech(chatResponse.message, null, accentName, true); // robotic=true
           if (audioToPlay && audioToPlay.size > 0) {
             console.log('TTS generated successfully', { blobSize: audioToPlay.size, blobType: audioToPlay.type });
@@ -758,7 +763,8 @@ const LiveChat = () => {
         // Stop any currently playing audio first
         stopAllAudio();
         
-        const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+        // HARDCODED: Always use Chinese voice for Wally
+        const accentName = "beijing";  // Always use Beijing/Chinese voice
         const audioBlob = await ttsService.generateSpeech(fallbackMessage.text, null, accentName, true); // robotic=true
         if (audioBlob) {
           const newMap = new Map(messageAudioMap);
@@ -1052,7 +1058,8 @@ const LiveChat = () => {
           if (!audioToPlay) {
             // Generate TTS if no audio provided
             try {
-              const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+              // HARDCODED: Always use Chinese voice for Wally
+              const accentName = "beijing";  // Always use Beijing/Chinese voice
               audioToPlay = await ttsService.generateSpeech(initialMessage.text, null, accentName, true); // robotic=true for Wally
             } catch (ttsError) {
               console.error('Error generating TTS for cleared conversation greeting:', ttsError);
