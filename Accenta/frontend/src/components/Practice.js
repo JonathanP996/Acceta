@@ -74,6 +74,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   const [useFileUpload, setUseFileUpload] = useState(false);
   const [uploadedFile, setUploadedFile] = useState(null);
   const fileInputRef = useRef(null);
+  const [barWidth, setBarWidth] = useState(0);
 
   // Load profile settings from localStorage
   useEffect(() => {
@@ -514,6 +515,12 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       setAnalysisResult(resultWithEvaluation);
       setIsProcessing(false);
       
+      // Reset and animate bar width
+      setBarWidth(0);
+      setTimeout(() => {
+        setBarWidth(Math.min(accentEvaluationScore || 0, 100));
+      }, 300);
+      
     } catch (error) {
       console.error('Error detecting accent:', error);
       setIsProcessing(false);
@@ -529,6 +536,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       setAudioData(null);
       setAnalysisResult(null);
       setHasPlayedOnce(false);
+      setBarWidth(0);
       setUploadedFile(null);
       setUseFileUpload(false);
     } else {
@@ -542,6 +550,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     setAudioData(null);
     setAnalysisResult(null);
     setUploadedFile(null);
+    setBarWidth(0);
   };
 
   const handleFileUpload = async (file) => {
@@ -608,6 +617,12 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       };
       
       setAnalysisResult(resultWithEvaluation);
+      
+      // Reset and animate bar width
+      setBarWidth(0);
+      setTimeout(() => {
+        setBarWidth(Math.min(accentEvaluationScore || 0, 100));
+      }, 300);
     } catch (error) {
       console.error('❌ Accent detection error:', error);
       setAnalysisResult({
@@ -630,7 +645,65 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   };
 
   return (
-    <div className={`min-h-screen bg-gradient-to-br ${currentColorScheme.backgroundGradient} flex flex-col opacity-90`}>
+    <>
+      <style>{`
+        @keyframes scaleInBounce {
+          0% {
+            opacity: 0;
+            transform: scale(0.8) translateY(20px);
+          }
+          50% {
+            transform: scale(1.05) translateY(-5px);
+          }
+          100% {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+          }
+        }
+        
+        @keyframes waterFill {
+          from {
+            width: 0%;
+          }
+          to {
+            width: 100%;
+          }
+        }
+        
+        @keyframes shimmer {
+          0% {
+            transform: translateX(-100%);
+          }
+          100% {
+            transform: translateX(200%);
+          }
+        }
+        
+        @keyframes spillOverflow {
+          0% {
+            opacity: 0;
+            transform: translateX(0) scaleY(1);
+          }
+          50% {
+            opacity: 0.8;
+            transform: translateX(4px) scaleY(1.2);
+          }
+          100% {
+            opacity: 0.4;
+            transform: translateX(8px) scaleY(0.8);
+          }
+        }
+        
+        @keyframes circleFill {
+          0% {
+            stroke-dashoffset: 314.16;
+          }
+          100% {
+            stroke-dashoffset: var(--target-offset);
+          }
+        }
+      `}</style>
+      <div className={`min-h-screen bg-gradient-to-br ${currentColorScheme.backgroundGradient} flex flex-col opacity-90`}>
       {/* Progress Bar at Top */}
       <div className={`w-full px-4 pt-4 pb-2 transition-all duration-700 ${
         isMounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'
@@ -918,12 +991,17 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
 
             {/* Accent Detection Results */}
             {analysisResult && !isProcessing && (
-              <div className="mt-8 p-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border-2 border-blue-200" style={{ animation: 'fadeInSlideUp 0.7s ease-out forwards' }}>
-              <h3 className="text-xl font-bold text-gray-900 mb-4">Accent Detection Results</h3>
-              
-              {/* Accent Evaluation Score - Visual Circular Progress */}
+              <div className="mt-8">
+              {/* Accent Evaluation Score - Visual Circular Progress with Water Animation */}
               {analysisResult.accent_evaluation_score !== undefined && (
-                <div className="mb-6 p-6 bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 rounded-2xl border-2 border-purple-200 shadow-lg">
+                <div 
+                  className="mb-6 p-6 bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 rounded-2xl border-2 border-purple-200 shadow-lg relative overflow-hidden"
+                  style={{ 
+                    animation: 'scaleInBounce 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
+                    opacity: 0,
+                    transform: 'scale(0.8)'
+                  }}
+                >
                   <div className="flex items-center justify-between mb-4">
                     <span className="text-xl font-bold text-gray-800">Accent Evaluation Score</span>
                   </div>
@@ -941,7 +1019,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
                           stroke="#E5E7EB"
                           strokeWidth="8"
                         />
-                        {/* Progress circle */}
+                        {/* Progress circle with animation */}
                         <circle
                           cx="60"
                           cy="60"
@@ -955,12 +1033,14 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
                           strokeWidth="8"
                           strokeLinecap="round"
                           strokeDasharray={`${2 * Math.PI * 50}`}
-                          strokeDashoffset={`${2 * Math.PI * 50 * (1 - (analysisResult.accent_evaluation_score || 0) / 100)}`}
-                          className="transition-all duration-1000 ease-out"
+                          strokeDashoffset={`${2 * Math.PI * 50}`}
                           style={{
                             filter: analysisResult.accent_evaluation_score >= 80 ? 'drop-shadow(0 0 8px rgba(16, 185, 129, 0.5))' :
                                     analysisResult.accent_evaluation_score >= 60 ? 'drop-shadow(0 0 8px rgba(245, 158, 11, 0.5))' :
-                                    'drop-shadow(0 0 8px rgba(239, 68, 68, 0.5))'
+                                    'drop-shadow(0 0 8px rgba(239, 68, 68, 0.5))',
+                            animation: 'circleFill 1.2s ease-out forwards',
+                            animationDelay: '0.2s',
+                            '--target-offset': `${2 * Math.PI * 50 * (1 - (analysisResult.accent_evaluation_score || 0) / 100)}`
                           }}
                         />
                       </svg>
@@ -987,16 +1067,45 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
                     </div>
                   </div>
                   
-                  {/* Linear Progress Bar (secondary visualization) */}
-                  <div className="w-full bg-gray-200 rounded-full h-3 mb-3">
+                  {/* Linear Progress Bar with Water Fill Animation */}
+                  <div className="relative w-full bg-gray-200 rounded-full h-4 mb-3 overflow-hidden">
+                    {/* Water fill effect */}
                     <div
-                      className={`h-3 rounded-full transition-all duration-1000 ease-out ${
-                        analysisResult.accent_evaluation_score >= 80 ? 'bg-gradient-to-r from-green-500 to-emerald-500' :
-                        analysisResult.accent_evaluation_score >= 60 ? 'bg-gradient-to-r from-yellow-500 to-orange-500' :
-                        'bg-gradient-to-r from-red-500 to-pink-500'
+                      className={`h-full rounded-full relative overflow-hidden ${
+                        analysisResult.accent_evaluation_score >= 80 ? 'bg-gradient-to-r from-green-500 via-emerald-400 to-green-500' :
+                        analysisResult.accent_evaluation_score >= 60 ? 'bg-gradient-to-r from-yellow-500 via-orange-400 to-yellow-500' :
+                        'bg-gradient-to-r from-red-500 via-pink-400 to-red-500'
                       }`}
-                      style={{ width: `${Math.min(analysisResult.accent_evaluation_score || 0, 100)}%` }}
-                    />
+                      style={{ 
+                        width: '0%',
+                        animation: `waterFill 1.5s ease-out forwards`,
+                        animationDelay: '0.3s',
+                        '--target-width': `${Math.min(analysisResult.accent_evaluation_score || 0, 100)}%`
+                      }}
+                    >
+                      {/* Water shimmer effect */}
+                      <div 
+                        className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+                        style={{
+                          animation: 'shimmer 2s infinite',
+                          transform: 'translateX(-100%)'
+                        }}
+                      />
+                    </div>
+                    
+                    {/* Spill effect on the right side when score is high */}
+                    {analysisResult.accent_evaluation_score >= 90 && (
+                      <div 
+                        className="absolute right-0 top-0 h-full w-2 opacity-0"
+                        style={{
+                          animation: 'spillOverflow 0.6s ease-out forwards',
+                          animationDelay: '1.8s',
+                          background: analysisResult.accent_evaluation_score >= 80 
+                            ? 'linear-gradient(to right, rgba(16, 185, 129, 0.6), transparent)'
+                            : 'linear-gradient(to right, rgba(245, 158, 11, 0.6), transparent)'
+                        }}
+                      />
+                    )}
                   </div>
                   
                   {/* Score breakdown */}
@@ -1046,6 +1155,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
         </div>
       </div>
     </div>
+    </>
   );
 };
 
