@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
-import { analysisService, chatService, ttsService } from '../services/api';
+import { analysisService, chatService, ttsService, authService, getUserStorageKey } from '../services/api';
 import AudioReactiveAvatar from './AudioReactiveAvatar';
 
 const LiveChat = () => {
@@ -35,15 +35,19 @@ const LiveChat = () => {
     colorScheme: 'blueOrange',
   });
 
-  // Load profile settings from localStorage
+  // Load profile settings from localStorage (email-specific)
   useEffect(() => {
-    const savedSettings = localStorage.getItem('profileSettings');
-    if (savedSettings) {
-      try {
-        const parsed = JSON.parse(savedSettings);
-        setProfileSettings(parsed);
-      } catch (error) {
-        console.error('Error loading profile settings:', error);
+    const currentUser = authService.getCurrentUser();
+    if (currentUser?.email) {
+      const storageKey = getUserStorageKey('profileSettings', currentUser.email);
+      const savedSettings = localStorage.getItem(storageKey);
+      if (savedSettings) {
+        try {
+          const parsed = JSON.parse(savedSettings);
+          setProfileSettings(parsed);
+        } catch (error) {
+          console.error('Error loading profile settings:', error);
+        }
       }
     }
   }, []);
@@ -518,12 +522,20 @@ const LiveChat = () => {
         (async () => {
           try {
             console.log('🔄 [FRONTEND] Calling sendMessageWithAudioUpload...');
+            // Extract language and accent as strings (handle both object and string formats)
+            const languageName = typeof profile.language === 'object' 
+              ? (profile.language?.name || profile.language?.id || 'English')
+              : (profile.language || 'English');
+            const accentName = typeof profile.accent === 'object'
+              ? (profile.accent?.name || profile.accent?.id || 'American English')
+              : (profile.accent || 'American English');
+            
             const response = await chatService.sendMessageWithAudioUpload(
               audioBlob,
               {
                 user_id: user.user_id,
-                language: profile.language,
-                target_accent: profile.accent,
+                language: languageName,
+                target_accent: accentName,
               },
               historyForAPI
             );
@@ -644,12 +656,20 @@ const LiveChat = () => {
         content: msg.content
       }));
       
+      // Extract language and accent as strings (handle both object and string formats)
+      const languageName = typeof profile.language === 'object' 
+        ? (profile.language?.name || profile.language?.id || 'English')
+        : (profile.language || 'English');
+      const accentName = typeof profile.accent === 'object'
+        ? (profile.accent?.name || profile.accent?.id || 'American English')
+        : (profile.accent || 'American English');
+      
       // Call backend API to generate AI response with audio
       const chatResponse = await chatService.sendMessageWithAudio({
         user_id: user.user_id,
         session_id: `chat_${Date.now()}`,
-        language: profile.language,
-        target_accent: profile.accent,
+        language: languageName,
+        target_accent: accentName,
         user_message: userText,
         pronunciation_score: analysisResult.accent_score,
         struggle_areas: analysisResult.struggle_areas || [],
@@ -997,11 +1017,19 @@ const LiveChat = () => {
       const generateInitialGreeting = async () => {
         try {
           const user = JSON.parse(localStorage.getItem('user'));
+          // Extract language and accent as strings (handle both object and string formats)
+          const languageName = typeof profile.language === 'object' 
+            ? (profile.language?.name || profile.language?.id || 'English')
+            : (profile.language || 'English');
+          const accentName = typeof profile.accent === 'object'
+            ? (profile.accent?.name || profile.accent?.id || 'American English')
+            : (profile.accent || 'American English');
+          
           const chatResponse = await chatService.sendMessageWithAudio({
             user_id: user.user_id,
             session_id: `chat_init_${Date.now()}`,
-            language: profile.language,
-            target_accent: profile.accent,
+            language: languageName,
+            target_accent: accentName,
             user_message: "",
             conversation_history: [],
           });

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LANGUAGES, searchLanguages } from '../data/languages';
-import { authService } from '../services/api';
+import { authService, getUserStorageKey } from '../services/api';
 
 const LanguageSelection = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -9,25 +9,27 @@ const LanguageSelection = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Check if user has a profile by checking:
-    // 1. If they've completed initial test (stored in localStorage or state)
-    // 2. If they have profile data in localStorage
-    // 3. If they've visited dashboard before (indicates they have a profile)
+    // Check if user has a profile by checking email-specific localStorage
     const user = authService.getCurrentUser();
-    if (user) {
-      // Check for profile indicators
-      const hasCompletedTest = localStorage.getItem('hasCompletedInitialTest');
-      const hasProfileData = localStorage.getItem('userProfile');
-      const hasVisitedDashboard = localStorage.getItem('hasVisitedDashboard');
+    if (user?.email) {
+      // Check for email-specific profile data
+      const profileStorageKey = getUserStorageKey('currentProfile', user.email);
+      const storedProfile = localStorage.getItem(profileStorageKey);
       
-      // User has a profile if any of these are true
-      setHasProfile(!!(hasCompletedTest || hasProfileData || hasVisitedDashboard));
+      // User has a profile if they have stored profile data
+      setHasProfile(!!storedProfile);
+    } else {
+      setHasProfile(false);
     }
   }, []);
 
-  // Get progress for each language (mock data for now, can be enhanced later)
+  // Get progress for each language (email-specific)
   const getLanguageProgress = (languageId) => {
-    const storedProfile = localStorage.getItem('currentProfile');
+    const user = authService.getCurrentUser();
+    if (!user?.email) return 0;
+    
+    const profileStorageKey = getUserStorageKey('currentProfile', user.email);
+    const storedProfile = localStorage.getItem(profileStorageKey);
     if (storedProfile) {
       try {
         const profile = JSON.parse(storedProfile);
@@ -141,18 +143,20 @@ const LanguageSelection = () => {
                 >
                   <div className="text-6xl mb-4">{language.flag}</div>
                   <h3 className="text-lg font-bold text-gray-900 mb-2">{language.name}</h3>
-                  <div className="mt-4">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-gray-500">Progress</span>
-                      <span className="text-sm font-semibold text-gray-900">{progress}%</span>
+                  {progress > 0 && (
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-gray-500">Progress</span>
+                        <span className="text-sm font-semibold text-gray-900">{progress}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="bg-gradient-to-r from-blue-500 to-orange-500 h-2 rounded-full transition-all duration-500"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
                     </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className="bg-gradient-to-r from-blue-500 to-orange-500 h-2 rounded-full transition-all duration-500"
-                        style={{ width: `${progress}%` }}
-                      />
-                    </div>
-                  </div>
+                  )}
                 </button>
               );
             })}

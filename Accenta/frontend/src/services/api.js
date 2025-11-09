@@ -109,6 +109,15 @@ export const authService = {
   },
 };
 
+// Utility function to get user-specific localStorage keys
+export const getUserStorageKey = (key, email) => {
+  if (!email) {
+    const currentUser = authService.getCurrentUser();
+    email = currentUser?.email;
+  }
+  return email ? `${key}_${email}` : key;
+};
+
 // Analysis services
 export const analysisService = {
   analyzeAccent: async (formData) => {

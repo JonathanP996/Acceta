@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { authService } from '../services/api';
+import { authService, getUserStorageKey } from '../services/api';
 import { getSkillLevel, getProgressPercentage, ENGLISH_SKILLS } from '../data/skills';
 
 const Profile = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [profiles, setProfiles] = useState([]);
+  const [currentProfile, setCurrentProfile] = useState(null);
   const [expandedAccents, setExpandedAccents] = useState(new Set());
   const [visibleSections, setVisibleSections] = useState(new Set());
   const sectionRefs = useRef({});
@@ -124,18 +125,22 @@ const Profile = () => {
     });
   };
 
-  // Load profile settings from localStorage
+  // Load profile settings from localStorage (email-specific)
   useEffect(() => {
-    const savedSettings = localStorage.getItem('profileSettings');
-    if (savedSettings) {
-      try {
-        const parsed = JSON.parse(savedSettings);
-        setProfileSettings(parsed);
-        if (parsed.profilePic) {
-          setProfilePicPreview(parsed.profilePic);
+    const currentUser = authService.getCurrentUser();
+    if (currentUser?.email) {
+      const storageKey = getUserStorageKey('profileSettings', currentUser.email);
+      const savedSettings = localStorage.getItem(storageKey);
+      if (savedSettings) {
+        try {
+          const parsed = JSON.parse(savedSettings);
+          setProfileSettings(parsed);
+          if (parsed.profilePic) {
+            setProfilePicPreview(parsed.profilePic);
+          }
+        } catch (error) {
+          console.error('Error loading profile settings:', error);
         }
-      } catch (error) {
-        console.error('Error loading profile settings:', error);
       }
     }
   }, []);
@@ -166,26 +171,31 @@ const Profile = () => {
     }
   };
 
-  // Save profile settings
+  // Save profile settings (email-specific)
   const handleSaveProfile = () => {
-    const settingsToSave = {
-      ...profileSettings,
-      profilePic: profilePicPreview,
-    };
-    localStorage.setItem('profileSettings', JSON.stringify(settingsToSave));
-    setIsEditModalOpen(false);
-    // Force re-render to update UI
-    window.location.reload();
+    const currentUser = authService.getCurrentUser();
+    if (currentUser?.email) {
+      const settingsToSave = {
+        ...profileSettings,
+        profilePic: profilePicPreview,
+      };
+      const storageKey = getUserStorageKey('profileSettings', currentUser.email);
+      localStorage.setItem(storageKey, JSON.stringify(settingsToSave));
+      setIsEditModalOpen(false);
+      // Force re-render to update UI
+      window.location.reload();
+    }
   };
 
   useEffect(() => {
     const currentUser = authService.getCurrentUser();
     setUser(currentUser);
 
-    // Load all profiles from localStorage
+    // Load all profiles from localStorage (email-specific)
     // In production, this would fetch from backend
     const loadProfiles = () => {
-      const storedProfile = localStorage.getItem('currentProfile');
+      const profileStorageKey = getUserStorageKey('currentProfile', currentUser?.email);
+      const storedProfile = localStorage.getItem(profileStorageKey);
       const allProfiles = [];
       
       if (storedProfile) {
@@ -193,7 +203,14 @@ const Profile = () => {
           const profile = JSON.parse(storedProfile);
           // Add lastPracticed timestamp (mock data - in production this comes from backend)
           profile.lastPracticed = new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000);
-          profile.id = `${profile.language?.id || 'english'}_${profile.accent?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
+          const accentName = typeof profile.accent === 'object' ? profile.accent?.name : profile.accent;
+          profile.id = `${profile.language?.id || 'english'}_${accentName?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
+          
+          // Ensure skillLevel is set if missing
+          if (!profile.skillLevel && profile.overallScore !== undefined) {
+            profile.skillLevel = getSkillLevel(profile.overallScore);
+          }
+          
           allProfiles.push(profile);
         } catch (error) {
           console.error('Error parsing stored profile:', error);
@@ -259,6 +276,10 @@ const Profile = () => {
       unique.sort((a, b) => b.lastPracticed - a.lastPracticed);
       
       setProfiles(unique);
+      // Set the first profile as current (most recent)
+      if (unique.length > 0) {
+        setCurrentProfile(unique[0]);
+      }
     };
 
     loadProfiles();
@@ -318,7 +339,51 @@ const Profile = () => {
               <h1 className="text-4xl font-bold text-gray-900 mb-2">
                 {getGreeting()}, {getDisplayName()}! 👋
               </h1>
-              <p className="text-lg text-gray-600">{user?.email}</p>
+              <p className="text-lg text-gray-600 mb-2">{user?.email}</p>
+              {(() => {
+                // Get skill level from current profile (most recent)
+                const profile = currentProfile || (profiles.length > 0 ? profiles[0] : null);
+                let skillLevelName = null;
+                
+                if (profile) {
+                  // Try to get skill level from profile
+                  if (profile.skillLevel) {
+                    const skillLevel = profile.skillLevel;
+                    if (typeof skillLevel === 'object' && skillLevel.name) {
+                      skillLevelName = skillLevel.name;
+                    } else if (typeof skillLevel === 'string') {
+                      skillLevelName = skillLevel;
+                    }
+                  }
+                  
+                  // Fallback: Calculate skill level from overall score if skillLevel is missing
+                  if (!skillLevelName && profile.overallScore !== undefined) {
+                    const calculatedLevel = getSkillLevel(profile.overallScore);
+                    skillLevelName = calculatedLevel.name;
+                  }
+                }
+                
+                // Always show skill level if we have a profile (even if we need to calculate it)
+                if (profile && !skillLevelName && profile.overallScore === undefined) {
+                  // If no score, default to Beginner
+                  skillLevelName = 'Beginner';
+                }
+                
+                return skillLevelName ? (
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-sm font-semibold text-gray-700">Skill Level:</span>
+                    <span className={`px-3 py-1 rounded-full text-sm font-bold ${
+                      skillLevelName === 'Beginner' ? 'bg-red-100 text-red-800' :
+                      skillLevelName === 'Intermediate' ? 'bg-orange-100 text-orange-800' :
+                      skillLevelName === 'Adept' ? 'bg-yellow-100 text-yellow-800' :
+                      skillLevelName === 'Pro' ? 'bg-green-100 text-green-800' :
+                      'bg-blue-100 text-blue-800'
+                    }`}>
+                      {skillLevelName}
+                    </span>
+                  </div>
+                ) : null;
+              })()}
             </div>
 
             {/* Edit Profile Button */}

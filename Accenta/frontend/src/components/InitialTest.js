@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
-import { analysisService, ttsService } from '../services/api';
+import { analysisService, ttsService, authService, getUserStorageKey } from '../services/api';
 import { getTestPrompts } from '../data/languagePrompts';
 import { getSkillLevel, SKILL_LEVELS } from '../data/skills';
 
@@ -57,15 +57,19 @@ const InitialTest = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load profile settings from localStorage
+  // Load profile settings from localStorage (email-specific)
   useEffect(() => {
-    const savedSettings = localStorage.getItem('profileSettings');
-    if (savedSettings) {
-      try {
-        const parsed = JSON.parse(savedSettings);
-        setProfileSettings(parsed);
-      } catch (error) {
-        console.error('Error loading profile settings:', error);
+    const currentUser = authService.getCurrentUser();
+    if (currentUser?.email) {
+      const storageKey = getUserStorageKey('profileSettings', currentUser.email);
+      const savedSettings = localStorage.getItem(storageKey);
+      if (savedSettings) {
+        try {
+          const parsed = JSON.parse(savedSettings);
+          setProfileSettings(parsed);
+        } catch (error) {
+          console.error('Error loading profile settings:', error);
+        }
       }
     }
   }, []);

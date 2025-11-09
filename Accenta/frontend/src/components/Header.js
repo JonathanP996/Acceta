@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { authService } from '../services/api';
+import { authService, getUserStorageKey } from '../services/api';
 
 const Header = () => {
   const navigate = useNavigate();
@@ -12,15 +12,19 @@ const Header = () => {
     profilePic: null,
   });
 
-  // Load profile settings from localStorage
+  // Load profile settings from localStorage (email-specific)
   useEffect(() => {
-    const savedSettings = localStorage.getItem('profileSettings');
-    if (savedSettings) {
-      try {
-        const parsed = JSON.parse(savedSettings);
-        setProfileSettings(parsed);
-      } catch (error) {
-        console.error('Error loading profile settings:', error);
+    const currentUser = authService.getCurrentUser();
+    if (currentUser?.email) {
+      const storageKey = getUserStorageKey('profileSettings', currentUser.email);
+      const savedSettings = localStorage.getItem(storageKey);
+      if (savedSettings) {
+        try {
+          const parsed = JSON.parse(savedSettings);
+          setProfileSettings(parsed);
+        } catch (error) {
+          console.error('Error loading profile settings:', error);
+        }
       }
     }
   }, []);

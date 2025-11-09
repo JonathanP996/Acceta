@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { authService } from '../services/api';
+import { authService, getUserStorageKey } from '../services/api';
 import { SKILL_LEVELS } from '../data/skills';
 
 const Survey = () => {
@@ -27,14 +27,17 @@ const Survey = () => {
     const currentUser = authService.getCurrentUser();
     setUser(currentUser);
 
-    // Load profile settings
-    const savedSettings = localStorage.getItem('profileSettings');
-    if (savedSettings) {
-      try {
-        const parsed = JSON.parse(savedSettings);
-        setProfileSettings(parsed);
-      } catch (error) {
-        console.error('Error loading profile settings:', error);
+    // Load profile settings (email-specific)
+    if (currentUser?.email) {
+      const storageKey = getUserStorageKey('profileSettings', currentUser.email);
+      const savedSettings = localStorage.getItem(storageKey);
+      if (savedSettings) {
+        try {
+          const parsed = JSON.parse(savedSettings);
+          setProfileSettings(parsed);
+        } catch (error) {
+          console.error('Error loading profile settings:', error);
+        }
       }
     }
   }, [language, accent, navigate]);

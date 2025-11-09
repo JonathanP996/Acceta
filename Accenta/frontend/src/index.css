@@ -113,6 +113,26 @@ code {
   animation: rev 0.1s ease-in-out infinite;
 }
 
+/* Driving in place animation for F1 car */
+@keyframes driveInPlace {
+  0%, 100% {
+    transform: translateX(0) translateY(0) scale(1.02);
+  }
+  25% {
+    transform: translateX(3px) translateY(-1px) scale(1.02);
+  }
+  50% {
+    transform: translateX(0) translateY(0) scale(1.02);
+  }
+  75% {
+    transform: translateX(-3px) translateY(1px) scale(1.02);
+  }
+}
+
+.animate-drive {
+  animation: driveInPlace 0.3s ease-in-out infinite;
+}
+
 /* Fade in and slide up for practice box */
 @keyframes fadeInSlideUp {
   from {
