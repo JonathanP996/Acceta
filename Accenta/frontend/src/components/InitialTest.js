@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
-import { analysisService, ttsService } from '../services/api';
+import { accentDetectionService, ttsService } from '../services/api';
 import { getTestPrompts } from '../data/languagePrompts';
 import { getSkillLevel, SKILL_LEVELS } from '../data/skills';
 
@@ -256,35 +256,10 @@ const InitialTest = () => {
     try {
       const audioBlob = await audioCapture.stopRecording();
       
-          // Create form data for API
-          const formData = new FormData();
-          formData.append('audio_file', audioBlob, 'recording.wav');
-          formData.append('user_id', JSON.parse(localStorage.getItem('user')).user_id);
-          formData.append('session_id', `test_${Date.now()}`);
-          // Use language ID (ISO-639-1 code) instead of name for Whisper API
-          // Map language IDs to ISO-639-1 codes
-          const languageCodeMap = {
-            'english': 'en',
-            'spanish': 'es',
-            'french': 'fr',
-            'german': 'de',
-            'italian': 'it',
-            'portuguese': 'pt',
-            'chinese': 'zh',
-            'mandarin': 'zh',
-            'japanese': 'ja',
-            'korean': 'ko',
-            'russian': 'ru',
-            'arabic': 'ar',
-            'hindi': 'hi',
-          };
-          const languageCode = languageCodeMap[language.id] || language.id;
-          formData.append('language', languageCode);
-          formData.append('target_accent', accent.name);
-          formData.append('expected_text', TEST_PROMPTS[currentPrompt]); // Send the expected phrase
-
-      // Analyze the recording
-      const result = await analysisService.analyzeAccent(formData);
+      // Detect accent from the recording
+      console.log('🎤 Detecting accent from recording...');
+      const result = await accentDetectionService.detectAccent(audioBlob);
+      console.log('✅ Accent detection result:', result);
       
       setTestResults([...testResults, {
         prompt: TEST_PROMPTS[currentPrompt],

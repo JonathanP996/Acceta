@@ -1,4 +1,0 @@
-"""
-Accent Evaluation Models
-"""
-

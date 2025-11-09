@@ -197,14 +197,39 @@ class AudioCapture {
     const arrayBuffer = await audioBlob.arrayBuffer();
     const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
 
-    // Convert to 16-bit PCM WAV
-    const wav = this.audioBufferToWav(audioBuffer);
+    // CRITICAL FIX: Resample to 44.1kHz to match backend expectation
+    // AudioContext may use 48kHz or other rates, but backend expects 44.1kHz
+    const targetSampleRate = 44100;
+    let resampledBuffer = audioBuffer;
+    
+    if (audioBuffer.sampleRate !== targetSampleRate) {
+      console.log(`Resampling from ${audioBuffer.sampleRate}Hz to ${targetSampleRate}Hz`);
+      // Create offline context for resampling
+      const offlineContext = new OfflineAudioContext(
+        1, // channels
+        Math.floor(audioBuffer.length * targetSampleRate / audioBuffer.sampleRate), // length
+        targetSampleRate // sample rate
+      );
+      
+      // Create buffer source
+      const source = offlineContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(offlineContext.destination);
+      source.start(0);
+      
+      // Render to get resampled audio
+      resampledBuffer = await offlineContext.startRendering();
+    }
+
+    // Convert to 16-bit PCM WAV at target sample rate
+    const wav = this.audioBufferToWav(resampledBuffer, targetSampleRate);
     return new Blob([wav], { type: 'audio/wav' });
   }
 
-  audioBufferToWav(buffer) {
+  audioBufferToWav(buffer, targetSampleRate = null) {
     const length = buffer.length;
-    const sampleRate = buffer.sampleRate;
+    // Use targetSampleRate if provided, otherwise use buffer's sample rate
+    const sampleRate = targetSampleRate || buffer.sampleRate;
     const arrayBuffer = new ArrayBuffer(44 + length * 2);
     const view = new DataView(arrayBuffer);
 
@@ -230,10 +255,15 @@ class AudioCapture {
     view.setUint32(40, length * 2, true);
 
     // Convert float samples to 16-bit PCM
+    // CRITICAL FIX: Use symmetric quantization to avoid DC bias
+    // Old code: negative * 0x8000, positive * 0x7FFF (asymmetric)
+    // New code: symmetric quantization for both positive and negative
     let offset = 44;
     for (let i = 0; i < length; i++) {
       const sample = Math.max(-1, Math.min(1, buffer.getChannelData(0)[i]));
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+      // Symmetric quantization: multiply by 32767, then clamp to int16 range
+      const quantized = Math.max(-32768, Math.min(32767, Math.round(sample * 32767)));
+      view.setInt16(offset, quantized, true);
       offset += 2;
     }
 

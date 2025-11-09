@@ -10,9 +10,8 @@ export const API_ENDPOINTS = {
   LOGIN: `${API_BASE_URL}/api/auth/login`,
   GET_USER: (userId) => `${API_BASE_URL}/api/auth/user/${userId}`,
   
-  // Analysis
-  ANALYZE_ACCENT: `${API_BASE_URL}/api/analyze_accent`,
-  ANALYZE_ACCENT_MULTI: `${API_BASE_URL}/api/analyze_accent_multi`,
+  // Accent Detection
+  DETECT_ACCENT: `${API_BASE_URL}/api/detect_accent`,
   
   // Chat
   CHAT_MESSAGE: `${API_BASE_URL}/api/chat/message`,

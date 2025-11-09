@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
 import WaveformVisualization from './WaveformVisualization';
-import { ttsService, analysisService } from '../services/api';
+import { ttsService, accentDetectionService } from '../services/api';
 import { getPracticePhrases } from '../data/languagePrompts';
 
 // Default practice phrases (fallback)
@@ -55,7 +55,6 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioCapture, setAudioCapture] = useState(null);
   const [audioData, setAudioData] = useState(null);
-  const [attempts, setAttempts] = useState(0);
   const [showWaveform, setShowWaveform] = useState(false);
   const [timedMode, setTimedMode] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(30);
@@ -425,7 +424,6 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     try {
       audioCapture.startRecording();
       setIsRecording(true);
-      setAttempts(attempts + 1);
     } catch (error) {
       console.error('Error starting recording:', error);
     }
@@ -442,51 +440,18 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       setAudioData(audioBlob);
       setShowWaveform(true);
       
-      // Analyze the recording using the same API as InitialTest
-      const formData = new FormData();
-      formData.append('audio_file', audioBlob, 'recording.wav');
+      // Detect accent from the recording
+      console.log('🎤 Detecting accent from recording...');
+      const result = await accentDetectionService.detectAccent(audioBlob);
+      console.log('✅ Accent detection result:', result);
       
-      const user = JSON.parse(localStorage.getItem('user'));
-      if (user?.user_id) {
-        formData.append('user_id', user.user_id);
-      }
-      
-      formData.append('session_id', `practice_${Date.now()}`);
-      
-      // Map language IDs to ISO-639-1 codes
-      const languageCodeMap = {
-        'english': 'en',
-        'spanish': 'es',
-        'french': 'fr',
-        'german': 'de',
-        'italian': 'it',
-        'portuguese': 'pt',
-        'chinese': 'zh',
-        'mandarin': 'zh',
-        'japanese': 'ja',
-        'korean': 'ko',
-        'russian': 'ru',
-        'arabic': 'ar',
-        'hindi': 'hi',
-      };
-      
-      const languageId = profile?.language?.id || 'english';
-      const languageCode = languageCodeMap[languageId] || languageId;
-      formData.append('language', languageCode);
-      
-      const accentName = typeof profile?.accent === 'object' ? profile.accent?.name : profile?.accent;
-      formData.append('target_accent', accentName || 'American');
-      formData.append('expected_text', phrases[currentPhrase]);
-
-      // Analyze the recording
-      const result = await analysisService.analyzeAccent(formData);
       setAnalysisResult(result);
       setIsProcessing(false);
       
     } catch (error) {
-      console.error('Error analyzing recording:', error);
+      console.error('Error detecting accent:', error);
       setIsProcessing(false);
-      const errorMessage = error.response?.data?.detail || error.message || 'Error analyzing recording. Please try again.';
+      const errorMessage = error.response?.data?.detail || error.message || 'Error detecting accent. Please try again.';
       alert(errorMessage);
     }
   };
@@ -494,7 +459,6 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   const nextPhrase = () => {
     if (currentPhrase < phrases.length - 1) {
       setCurrentPhrase(currentPhrase + 1);
-      setAttempts(0);
       setShowWaveform(false);
       setAudioData(null);
       setAnalysisResult(null);
@@ -506,7 +470,6 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   };
 
   const retry = () => {
-    setAttempts(0);
     setShowWaveform(false);
     setAudioData(null);
     setAnalysisResult(null);
@@ -716,12 +679,6 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
               </div>
             </div>
 
-            {/* Attempts Counter */}
-            {attempts > 0 && (
-              <div className="text-center text-gray-600 mb-4">
-                Attempt {attempts} of 3
-              </div>
-            )}
           </div>
 
           {/* Expandable Results Section */}
@@ -730,74 +687,65 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
             {isProcessing && (
               <div className="text-center text-gray-600 mt-8">
                 <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-accenta-primary"></div>
-                <p className="mt-2">Analyzing your pronunciation...</p>
+                <p className="mt-2">Detecting accent...</p>
               </div>
             )}
 
-            {/* Analysis Results - Same format as InitialTest */}
+            {/* Accent Detection Results */}
             {analysisResult && !isProcessing && (
               <div className="mt-8 p-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border-2 border-blue-200" style={{ animation: 'fadeInSlideUp 0.7s ease-out forwards' }}>
-              <h3 className="text-xl font-bold text-gray-900 mb-4">Your Results</h3>
+              <h3 className="text-xl font-bold text-gray-900 mb-4">Accent Detection Results</h3>
               
-              {/* Text Match Warning */}
-              {analysisResult.text_match_warning && (
+              {/* Uncertainty Warning */}
+              {analysisResult.is_uncertain && (
                 <div className="mb-4 p-4 bg-yellow-100 border-l-4 border-yellow-500 rounded">
                   <p className="text-yellow-800 font-semibold">
-                    ⚠️ {analysisResult.text_match_warning}
+                    ⚠️ Low Confidence Prediction
                   </p>
-                  {analysisResult.word_accuracy !== undefined && (
                     <p className="text-sm text-yellow-700 mt-1">
-                      Word match: {analysisResult.word_accuracy}%
-                    </p>
-                  )}
-                </div>
-              )}
-              
-              {/* Word Accuracy (if available and good) */}
-              {analysisResult.word_accuracy !== undefined && !analysisResult.text_match_warning && (
-                <div className="mb-4 p-3 bg-green-50 rounded">
-                  <p className="text-sm text-green-700">
-                    ✅ Word accuracy: {analysisResult.word_accuracy}%
+                    The model is uncertain about this prediction. Please check the top predictions below.
                   </p>
                 </div>
               )}
               
-              {/* Accent Score */}
+              {/* Predicted Accent */}
               <div className="mb-4">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold text-gray-700">Accent Accuracy</span>
-                  <span className="text-2xl font-bold text-accenta-primary">
-                    {analysisResult.accent_score?.toFixed(1) || 0}%
+                  <span className="text-sm font-semibold text-gray-700">Detected Accent</span>
+                  <span className={`text-2xl font-bold capitalize ${
+                    analysisResult.is_uncertain ? 'text-yellow-600' : 'text-accenta-primary'
+                  }`}>
+                    {analysisResult.predicted_accent || 'Unknown'}
                   </span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-3">
                   <div
-                    className="bg-accenta-primary h-3 rounded-full transition-all duration-500"
-                    style={{ width: `${analysisResult.accent_score || 0}%` }}
+                    className={`h-3 rounded-full transition-all duration-500 ${
+                      analysisResult.is_uncertain ? 'bg-yellow-500' : 'bg-accenta-primary'
+                    }`}
+                    style={{ width: `${Math.min(analysisResult.confidence || 0, 100)}%` }}
                   />
                 </div>
+                <p className={`text-sm mt-1 ${
+                  analysisResult.is_uncertain ? 'text-yellow-700' : 'text-gray-600'
+                }`}>
+                  Confidence: {analysisResult.confidence?.toFixed(1) || 0}%
+                  {analysisResult.is_uncertain && ' (Low confidence - see top predictions)'}
+                </p>
               </div>
 
-              {/* Feedback Summary */}
-              {analysisResult.feedback_summary && (
-                <div className="mb-4 p-4 bg-white rounded-lg border border-gray-200">
-                  <h4 className="text-sm font-semibold text-gray-900 mb-2">Feedback</h4>
-                  <p className="text-sm text-gray-700">{analysisResult.feedback_summary}</p>
-                </div>
-              )}
-
-              {/* Struggle Areas */}
-              {analysisResult.struggle_areas && analysisResult.struggle_areas.length > 0 && (
+              {/* Top Predictions */}
+              {analysisResult.top_predictions && analysisResult.top_predictions.length > 0 && (
                 <div className="mb-4">
-                  <h4 className="text-sm font-semibold text-gray-900 mb-2">Areas to Focus On</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {analysisResult.struggle_areas.map((area, index) => (
-                      <span
-                        key={index}
-                        className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium"
-                      >
-                        {area}
+                  <h4 className="text-sm font-semibold text-gray-900 mb-2">Top Predictions</h4>
+                  <div className="space-y-2">
+                    {analysisResult.top_predictions.map((pred, index) => (
+                      <div key={index} className="flex items-center justify-between p-2 bg-white rounded border border-gray-200">
+                        <span className="text-sm font-medium text-gray-700 capitalize">{pred.accent}</span>
+                        <span className="text-sm font-semibold text-accenta-primary">
+                          {pred.confidence?.toFixed(1) || 0}%
                       </span>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -805,18 +753,12 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
 
               {/* Action Buttons */}
               <div className="flex gap-4 mt-6">
-                {attempts < 3 ? (
                   <button
                     onClick={retry}
                     className="flex-1 bg-yellow-500 text-white rounded-lg py-3 font-semibold hover:bg-yellow-600 transition-colors"
                   >
-                    Try Again ({3 - attempts} attempts left)
+                  Try Again
                   </button>
-                ) : (
-                  <div className="flex-1 bg-gray-100 rounded-lg py-3 text-center text-gray-600">
-                    Maximum attempts reached
-                  </div>
-                )}
                 <button
                   onClick={nextPhrase}
                   className="flex-1 bg-accenta-primary text-white rounded-lg py-3 font-semibold hover:bg-accenta-secondary transition-colors"

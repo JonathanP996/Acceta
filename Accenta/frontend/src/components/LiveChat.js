@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
-import { analysisService, chatService, ttsService } from '../services/api';
+import { chatService, ttsService } from '../services/api';
 import AudioReactiveAvatar from './AudioReactiveAvatar';
 
 const LiveChat = () => {

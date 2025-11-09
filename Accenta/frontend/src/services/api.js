@@ -109,22 +109,19 @@ export const authService = {
   },
 };
 
-// Analysis services
-export const analysisService = {
-  analyzeAccent: async (formData) => {
-    const response = await api.post(API_ENDPOINTS.ANALYZE_ACCENT, formData, {
+// Accent Detection Service
+export const accentDetectionService = {
+  detectAccent: async (audioBlob) => {
+    const formData = new FormData();
+    // Send with .webm.wav hint to help backend detect browser recording
+    // Backend will use better resampling (kaiser_best) if it detects this
+    formData.append('audio_file', audioBlob, 'recording.webm.wav');
+    
+    const response = await api.post(API_ENDPOINTS.DETECT_ACCENT, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
-    });
-    return response.data;
-  },
-  
-  analyzeAccentMulti: async (formData) => {
-    const response = await api.post(API_ENDPOINTS.ANALYZE_ACCENT_MULTI, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
+      timeout: 30000, // 30 second timeout
     });
     return response.data;
   },

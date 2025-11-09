@@ -15,7 +15,6 @@ import base64
 
 from services.tts import text_to_speech
 from services.transcribe import transcribe_audio
-from services.accent_classifier import classify_accent
 
 logger = logging.getLogger(__name__)
 
@@ -270,123 +269,18 @@ class ChatRequest(BaseModel):
     language: str
     target_accent: str
     user_message: str
-    pronunciation_score: Optional[float] = None
-    struggle_areas: Optional[List[str]] = None
     conversation_history: Optional[List[ChatMessage]] = None
 
 
 class ChatResponse(BaseModel):
     ai_message: str
-    pronunciation_feedback: Optional[str] = None
     audio_url: Optional[str] = None
-
-
-def generate_pronunciation_feedback_with_gemini(
-        transcribed_text: str,
-        target_accent: str,
-        conversation_history: List[Dict[str, str]],
-        detected_user_accent: Optional[str] = None
-    ) -> Dict[str, Any]:
-    """
-    Use Gemini to analyze pronunciation and generate feedback
-    Returns dict with pronunciation_score, feedback, and struggle_areas
-    """
-    if not GEMINI_AVAILABLE:
-        # Fallback: simple heuristic
-        return {
-            "pronunciation_score": 75.0,
-            "feedback": "Keep practicing!",
-            "struggle_areas": []
-        }
-    
-    try:
-        # Build prompt for Gemini to analyze pronunciation
-        accent_context = ""
-        if detected_user_accent:
-            accent_context = f"\nNote: The student's current accent appears to be {detected_user_accent}. "
-            accent_context += f"Compare their pronunciation to {target_accent} and provide feedback on the differences."
-        
-        prompt = f"""You are Wally, a casual friend who happens to know about accents. You're helping someone practice their {target_accent} accent, but you're analyzing their pronunciation in a friendly, supportive way.
-
-They said: "{transcribed_text}"
-{accent_context}
-
-Analyze their pronunciation and provide:
-1. A pronunciation score (0-100) based on how well they match the {target_accent} accent
-2. Brief, encouraging feedback (1-2 sentences) - keep it casual and friendly
-3. Any specific sounds or areas they struggled with (list 1-3 items)
-
-Respond in this exact JSON format:
-{{
-    "pronunciation_score": <number>,
-    "feedback": "<brief, casual feedback>",
-    "struggle_areas": ["<area1>", "<area2>"]
-}}
-
-Be encouraging, specific, and keep the tone casual - like a friend giving helpful tips."""
-    
-        model = genai.GenerativeModel(GEMINI_MODEL_NAME)
-        response = model.generate_content(prompt)
-        
-        if response and response.text:
-            # Try to parse JSON from response
-            import json
-            
-            # Extract JSON from response (handle markdown code blocks)
-            text = response.text.strip()
-            # Try to find JSON object (handles nested braces)
-            json_match = None
-            start_idx = text.find('{')
-            if start_idx != -1:
-                brace_count = 0
-                for i in range(start_idx, len(text)):
-                    if text[i] == '{':
-                        brace_count += 1
-                    elif text[i] == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            json_match = text[start_idx:i+1]
-                            break
-            
-            if json_match:
-                json_str = json_match
-                try:
-                    result = json.loads(json_str)
-                    return {
-                        "pronunciation_score": float(result.get("pronunciation_score", 75.0)),
-                        "feedback": result.get("feedback", "Keep practicing!"),
-                        "struggle_areas": result.get("struggle_areas", [])
-                    }
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to parse Gemini JSON response: {json_str}")
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Failed to parse pronunciation analysis from Gemini. Response format was invalid."
-                    )
-        
-        # If no JSON found in response, raise error
-        logger.error("Gemini pronunciation analysis response did not contain valid JSON")
-        raise HTTPException(
-            status_code=500,
-            detail="Gemini pronunciation analysis response was not in expected JSON format."
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Gemini pronunciation analysis failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to analyze pronunciation with Gemini: {str(e)}"
-        )
 
 
 def generate_conversational_response(
     user_message: str,
     conversation_history: List[Dict[str, str]],
-    target_accent: str,
-    pronunciation_score: Optional[float] = None,
-    struggle_areas: Optional[List[str]] = None
+    target_accent: str
 ) -> str:
     """
     Generate a friendly, conversational AI response
@@ -431,17 +325,7 @@ def generate_conversational_response(
 
 They said: "{user_message}"
 
-Respond naturally in 1-2 sentences. Have a normal conversation - acknowledge what they said, share your thoughts, ask follow-up questions. Be genuinely interested in what they're saying. Only give pronunciation tips naturally if there's a clear issue, and weave it in casually (like "oh by the way, that word sounds great!" or "hey, try saying that 'r' a bit more"). But mostly just chat like a friend would."""
-    
-    # Add pronunciation feedback if available (keep concise)
-    if pronunciation_score is not None:
-        if pronunciation_score >= 80:
-            system_prompt += f"\n(Note: pronunciation excellent - {pronunciation_score:.1f}%)"
-        elif pronunciation_score < 60:
-            system_prompt += f"\n(Note: pronunciation needs work - {pronunciation_score:.1f}%)"
-    
-    if struggle_areas:
-        system_prompt += f"\n(Struggles: {', '.join(struggle_areas[:2])})"  # Limit to 2 areas
+Respond naturally in 1-2 sentences. Have a normal conversation - acknowledge what they said, share your thoughts, ask follow-up questions. Be genuinely interested in what they're saying. Chat like a friend would."""
     
     # CRITICAL: Must use Gemini - no fallback allowed
     if not GEMINI_AVAILABLE:
@@ -480,19 +364,9 @@ Respond naturally in 1-2 sentences. Have a normal conversation - acknowledge wha
         # Build the full prompt with user's current message (keep it minimal)
         current_user_message = user_message  # Don't add "Student:" prefix to save tokens
         
-        # Add pronunciation context if available (very brief)
-        pronunciation_note = ""
-        if pronunciation_score is not None:
-            if pronunciation_score >= 80:
-                pronunciation_note = f" (pronunciation: {pronunciation_score:.0f}%)"
-            elif pronunciation_score < 60:
-                pronunciation_note = f" (pronunciation: {pronunciation_score:.0f}% - needs work)"
-        
         # Build complete prompt - use simple format like diagnostic (which works)
         # Don't include history to avoid issues - the system_prompt already has the user message
         full_prompt = system_prompt
-        if pronunciation_note:
-            full_prompt += pronunciation_note
         
         # Use standard generate_content (more reliable than start_chat)
         # Configure safety settings to be more permissive for educational content
@@ -806,46 +680,6 @@ Respond naturally in 1-2 sentences. Have a normal conversation - acknowledge wha
     )
 
 
-def generate_fallback_response(user_message: str, pronunciation_score: Optional[float] = None) -> str:
-    """Generate a friendly fallback response based on what the user said"""
-    if not user_message or user_message.strip() == "":
-        return "Hey! I'm Wally. What's up? What are you into these days?"
-    
-    # Extract key information from user message to make response more relevant
-    user_lower = user_message.lower()
-    user_words = user_message.split()
-    
-    # Try to reference something specific from their message
-    if len(user_words) > 0:
-        # Use first few words or key topic
-        key_phrase = " ".join(user_words[:4]) if len(user_words) >= 4 else user_message[:30]
-        responses = [
-            f"Oh that's cool about {key_phrase}! {get_pronunciation_comment(pronunciation_score)} Tell me more - what got you into that?",
-            f"Nice! {get_pronunciation_comment(pronunciation_score)} I'd love to hear more about {key_phrase}. What's that like?",
-            f"That sounds interesting! {get_pronunciation_comment(pronunciation_score)} What do you like most about {key_phrase}?",
-            f"Cool! {get_pronunciation_comment(pronunciation_score)} How'd you get into {key_phrase}?",
-        ]
-    else:
-        responses = [
-            f"Oh that's cool! {get_pronunciation_comment(pronunciation_score)} Tell me more about that.",
-            f"Nice! {get_pronunciation_comment(pronunciation_score)} What's that like?",
-            f"That sounds interesting! {get_pronunciation_comment(pronunciation_score)} What do you think about it?",
-        ]
-    
-    import random
-    return random.choice(responses)
-
-
-def get_pronunciation_comment(score: Optional[float]) -> str:
-    """Get a pronunciation comment based on score - casual friend style"""
-    if score is None:
-        return ""
-    if score >= 80:
-        return "Oh, and by the way - you sounded great there!"
-    elif score >= 60:
-        return "You're doing really well, by the way!"
-    else:
-        return "Keep it up - you're getting there!"
 
 
 @router.post("/message", response_model=ChatResponse)
@@ -875,18 +709,8 @@ async def chat_message(request: ChatRequest):
         ai_message = generate_conversational_response(
             user_message=request.user_message,
             conversation_history=history,
-            target_accent=request.target_accent,
-            pronunciation_score=request.pronunciation_score,
-            struggle_areas=request.struggle_areas
+            target_accent=request.target_accent
         )
-        
-        # Generate pronunciation feedback if score is low
-        pronunciation_feedback = None
-        if request.pronunciation_score is not None and request.pronunciation_score < 70:
-            if request.struggle_areas:
-                pronunciation_feedback = f"Hey, try working on that '{request.struggle_areas[0]}' sound a bit - you're doing great though!"
-            else:
-                pronunciation_feedback = "Keep it up - you're getting there!"
         
         # Generate TTS audio
         try:
@@ -906,7 +730,6 @@ async def chat_message(request: ChatRequest):
         
         return ChatResponse(
             ai_message=ai_message,
-            pronunciation_feedback=pronunciation_feedback,
             audio_url=None  # In production, return CDN URL
         )
         
@@ -955,21 +778,16 @@ async def chat_message_with_audio(request: ChatRequest):
         
         return {
             "ai_message": chat_response.ai_message,
-            "pronunciation_feedback": chat_response.pronunciation_feedback,
             "audio_base64": audio_base64,  # May be None if TTS failed
         }
         
     except Exception as e:
-        total_time = time.time() - start_time if 'start_time' in locals() else 0
         logger.error("=" * 80)
-        logger.error(f"❌ CHAT REQUEST FAILED (Exception) - Total time: {total_time:.2f}s")
+        logger.error(f"❌ CHAT REQUEST FAILED (Exception)")
         logger.error(f"   Error: {str(e)}")
         logger.error(f"   Error type: {type(e).__name__}")
-        logger.error(f"   Step timings: {step_times if 'step_times' in locals() else 'N/A'}")
         logger.error("=" * 80)
         logger.error(f"Full exception traceback:", exc_info=True)
-        # Return response even if there's an error, so frontend can handle it
-        # But also raise HTTPException so frontend knows there was an error
         raise HTTPException(
             status_code=500,
             detail=f"Failed to generate chat response: {str(e)}"
@@ -986,11 +804,11 @@ async def chat_message_with_audio_upload(
     audio_file: UploadFile = File(...)
 ):
     """
-    Process audio directly: Whisper transcription -> Gemini feedback & response -> TTS
+    Process audio directly: Whisper transcription -> Gemini conversational response -> TTS
     
     This is the main endpoint for live chat that:
     1. Transcribes audio with Whisper
-    2. Uses Gemini to analyze pronunciation and generate conversational response
+    2. Uses Gemini to generate conversational response
     3. Generates TTS audio for the response
     """
     import time
@@ -1064,12 +882,7 @@ async def chat_message_with_audio_upload(
                 return {
                     "transcribed_text": "",
                     "ai_message": unclear_response,
-                    "pronunciation_score": None,
-                    "pronunciation_feedback": "Could you speak a bit more clearly?",
-                    "struggle_areas": [],
-                    "audio_base64": audio_base64,
-                    "detected_user_accent": None,
-                    "accent_confidence": None
+                    "audio_base64": audio_base64
                 }
             
             # Check if transcription is too short or unclear (less than 3 characters after cleaning)
@@ -1095,12 +908,7 @@ async def chat_message_with_audio_upload(
                 return {
                     "transcribed_text": cleaned_text,
                     "ai_message": unclear_response,
-                    "pronunciation_score": None,
-                    "pronunciation_feedback": "Could you speak a bit more clearly?",
-                    "struggle_areas": [],
-                    "audio_base64": audio_base64,
-                    "detected_user_accent": None,
-                    "accent_confidence": None
+                    "audio_base64": audio_base64
                 }
             
             # Check if transcription is mostly noise/unintelligible (mostly punctuation or special chars)
@@ -1128,63 +936,16 @@ async def chat_message_with_audio_upload(
                 return {
                     "transcribed_text": cleaned_text,
                     "ai_message": unclear_response,
-                    "pronunciation_score": None,
-                    "pronunciation_feedback": "Could you speak a bit more clearly?",
-                    "struggle_areas": [],
-                    "audio_base64": audio_base64,
-                    "detected_user_accent": None,
-                    "accent_confidence": None
+                    "audio_base64": audio_base64
                 }
             
             logger.info(f"   Whisper transcribed text: '{transcribed_text}' (detected language: {detected_language})")
             
-            # Step 2.5: Detect user's accent from audio (non-blocking, fast timeout)
-            # Skip accent detection if it's causing delays - can be re-enabled later
-            step_start = time.time()
+            # Accent detection removed - will be re-implemented with new model
             detected_user_accent = None
             accent_confidence = None
-            
-            # Temporarily disable accent detection to prevent hanging
-            # Set ENABLE_ACCENT_DETECTION=true in .env to re-enable
-            enable_accent_detection = os.getenv("ENABLE_ACCENT_DETECTION", "false").lower() == "true"
-            
-            if enable_accent_detection:
-                logger.info("🔄 STEP 2.5: Starting accent detection...")
-                try:
-                    import asyncio
-                    # Use a very short timeout to avoid blocking the request
-                    accent_classification = await asyncio.wait_for(
-                        classify_accent(
-                            tmp_file_path,
-                            use_classifier=False,  # Use fast heuristic to avoid timeout in live chat
-                            timeout=2.0  # Very short timeout - 2 seconds max
-                        ),
-                        timeout=2.0  # Maximum 2 seconds total
-                    )
-                    detected_user_accent = accent_classification.get("predicted_accent", None)
-                    accent_confidence = accent_classification.get("confidence", None)
-                    accent_method = accent_classification.get("method", "unknown")
-                    step_times['accent_detection'] = time.time() - step_start
-                    logger.info(f"✅ STEP 2.5: Accent detection completed ({step_times['accent_detection']:.2f}s)")
-                    logger.info(f"   Detected: {detected_user_accent} (confidence: {accent_confidence:.2f if accent_confidence else 'N/A'}, method: {accent_method})")
-                    
-                    # Note: User is speaking with {detected_user_accent} accent, learning {target_accent}
-                    if detected_user_accent:
-                        logger.info(f"   User accent noted: {detected_user_accent} (target: {target_accent})")
-                        
-                except asyncio.TimeoutError:
-                    step_times['accent_detection'] = time.time() - step_start
-                    logger.warning(f"⚠️ STEP 2.5: Accent detection timed out after 2s ({step_times['accent_detection']:.2f}s) - continuing without accent detection")
-                    detected_user_accent = None
-                    accent_confidence = None
-                except Exception as e:
-                    step_times['accent_detection'] = time.time() - step_start
-                    logger.warning(f"⚠️ STEP 2.5: Accent detection failed ({step_times['accent_detection']:.2f}s): {e} - continuing without accent detection")
-                    detected_user_accent = None
-                    accent_confidence = None
-            else:
-                step_times['accent_detection'] = 0
-                logger.debug("⏭️ STEP 2.5: Accent detection disabled (set ENABLE_ACCENT_DETECTION=true to enable)")
+            step_times['accent_detection'] = 0
+        
         finally:
             # Clean up temporary file immediately after accent detection
             try:
@@ -1223,42 +984,9 @@ async def chat_message_with_audio_upload(
             except Exception as e:
                 logger.warning(f"Failed to parse conversation history: {e}")
         
-        # Step 3: Use Gemini to analyze pronunciation and generate feedback
-        # Include detected user accent in the analysis for better feedback
+        # Step 3: Generate conversational response with Gemini
         step_start = time.time()
-        logger.info("🔄 STEP 3: Starting pronunciation analysis with Gemini...")
-        pronunciation_analysis = generate_pronunciation_feedback_with_gemini(
-            transcribed_text=transcribed_text,
-            target_accent=target_accent,
-            conversation_history=history,
-            detected_user_accent=detected_user_accent  # Pass detected accent for better analysis
-        )
-        step_times['pronunciation_analysis'] = time.time() - step_start
-        logger.info(f"✅ STEP 3: Pronunciation analysis completed ({step_times['pronunciation_analysis']:.2f}s)")
-        
-        # Check if pronunciation_analysis is None or not a dict
-        if pronunciation_analysis is None:
-            logger.error("❌ STEP 3: Pronunciation analysis returned None")
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to analyze pronunciation. Please try again."
-            )
-        
-        if not isinstance(pronunciation_analysis, dict):
-            logger.error(f"❌ STEP 3: Pronunciation analysis is not a dict: {type(pronunciation_analysis)}")
-            raise HTTPException(
-                status_code=500,
-                detail="Pronunciation analysis returned invalid format. Please try again."
-            )
-        
-        pronunciation_score = pronunciation_analysis.get("pronunciation_score", 75.0)
-        pronunciation_feedback = pronunciation_analysis.get("feedback", "")
-        struggle_areas = pronunciation_analysis.get("struggle_areas", [])
-        logger.info(f"   Pronunciation score: {pronunciation_score}, Struggle areas: {struggle_areas}")
-        
-        # Step 4: Generate conversational response with Gemini
-        step_start = time.time()
-        logger.info("🔄 STEP 4: Starting conversational response generation with Gemini...")
+        logger.info("🔄 STEP 3: Starting conversational response generation with Gemini...")
         logger.info(f"   User message (transcribed): '{transcribed_text}'")
         logger.info(f"   Conversation history length: {len(history)} messages")
         if history:
@@ -1266,12 +994,10 @@ async def chat_message_with_audio_upload(
         ai_message_raw = generate_conversational_response(
             user_message=transcribed_text,
             conversation_history=history,
-            target_accent=target_accent,
-            pronunciation_score=pronunciation_score,
-            struggle_areas=struggle_areas
+            target_accent=target_accent
         )
         step_times['conversational_response'] = time.time() - step_start
-        logger.info(f"✅ STEP 4: Conversational response generated ({step_times['conversational_response']:.2f}s)")
+        logger.info(f"✅ STEP 3: Conversational response generated ({step_times['conversational_response']:.2f}s)")
         
         # Remove asterisks from AI message
         ai_message = remove_asterisks(ai_message_raw) if ai_message_raw else None
@@ -1300,12 +1026,12 @@ async def chat_message_with_audio_upload(
         
         logger.info(f"   Generated AI response: '{ai_message[:100]}...' (length: {len(ai_message)})")
         
-        # Step 5: Generate TTS audio for response
+        # Step 4: Generate TTS audio for response
         step_start = time.time()
         audio_base64 = None
         accent_name = target_accent.lower().replace(' english', '').replace('english', '').strip()
         
-        logger.info("🔄 STEP 5: Starting TTS audio generation...")
+        logger.info("🔄 STEP 4: Starting TTS audio generation...")
         try:
             audio_bytes = await text_to_speech(
                 text=ai_message,
@@ -1316,14 +1042,14 @@ async def chat_message_with_audio_upload(
             
             if audio_bytes and len(audio_bytes) > 0:
                 audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
-                logger.info(f"✅ STEP 5: TTS audio generation completed ({step_times['tts_generation']:.2f}s)")
+                logger.info(f"✅ STEP 4: TTS audio generation completed ({step_times['tts_generation']:.2f}s)")
                 logger.info(f"   Generated audio: {len(audio_bytes)} bytes, base64 length: {len(audio_base64)}")
             else:
-                logger.warning(f"⚠️ STEP 5: TTS returned empty audio bytes ({step_times['tts_generation']:.2f}s)")
+                logger.warning(f"⚠️ STEP 4: TTS returned empty audio bytes ({step_times['tts_generation']:.2f}s)")
                 audio_base64 = None
         except Exception as tts_error:
             step_times['tts_generation'] = time.time() - step_start
-            logger.error(f"❌ STEP 5: TTS generation failed ({step_times['tts_generation']:.2f}s): {tts_error}", exc_info=True)
+            logger.error(f"❌ STEP 4: TTS generation failed ({step_times['tts_generation']:.2f}s): {tts_error}", exc_info=True)
             audio_base64 = None
         
         total_time = time.time() - start_time
@@ -1335,7 +1061,6 @@ async def chat_message_with_audio_upload(
         logger.info(f"     - Read audio: {step_times.get('read_audio', 0):.2f}s")
         logger.info(f"     - Whisper transcription: {step_times.get('whisper_transcription', 0):.2f}s")
         logger.info(f"     - Accent detection: {step_times.get('accent_detection', 0):.2f}s")
-        logger.info(f"     - Pronunciation analysis: {step_times.get('pronunciation_analysis', 0):.2f}s")
         logger.info(f"     - Conversational response: {step_times.get('conversational_response', 0):.2f}s")
         logger.info(f"     - TTS generation: {step_times.get('tts_generation', 0):.2f}s")
         logger.info(f"   Response: {len(ai_message)} chars, Audio: {'Yes' if audio_base64 else 'No'}")
@@ -1344,9 +1069,6 @@ async def chat_message_with_audio_upload(
         return {
             "transcribed_text": transcribed_text,
             "ai_message": ai_message,
-            "pronunciation_score": pronunciation_score,
-            "pronunciation_feedback": pronunciation_feedback,
-            "struggle_areas": struggle_areas,
             "audio_base64": audio_base64,
             "detected_user_accent": detected_user_accent,  # Include detected accent in response
             "accent_confidence": accent_confidence
