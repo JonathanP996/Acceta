@@ -33,7 +33,75 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   const location = useLocation();
   const navigate = useNavigate();
   const { profile: locationProfile, fromInitialTest, fromSurvey, customPhrases: locationCustomPhrases } = location.state || {};
-  const profile = propProfile || locationProfile;
+  
+  // State for profile that can be updated dynamically
+  const [profile, setProfile] = useState(propProfile || locationProfile);
+  
+  // Load profile from localStorage if not provided via props/location
+  useEffect(() => {
+    if (!profile) {
+      const storedProfile = localStorage.getItem('currentProfile');
+      if (storedProfile) {
+        try {
+          const parsed = JSON.parse(storedProfile);
+          setProfile(parsed);
+        } catch (error) {
+          console.error('Error parsing stored profile:', error);
+        }
+      }
+    }
+  }, []);
+  
+  // Listen for profile changes from dropdown
+  useEffect(() => {
+    const handleProfileChange = (event) => {
+      const newProfile = event.detail;
+      setProfile(newProfile);
+      console.log('🔄 Profile updated in Practice component:', {
+        language: typeof newProfile.language === 'object' ? newProfile.language?.name : newProfile.language,
+        accent: typeof newProfile.accent === 'object' ? newProfile.accent?.name : newProfile.accent
+      });
+    };
+    
+    const handleStorageChange = (event) => {
+      if (event.key === 'currentProfile') {
+        try {
+          const newProfile = JSON.parse(event.newValue);
+          setProfile(newProfile);
+        } catch (error) {
+          console.error('Error parsing profile from storage event:', error);
+        }
+      }
+    };
+    
+    window.addEventListener('profileChanged', handleProfileChange);
+    window.addEventListener('storage', handleStorageChange);
+    
+    // Also check localStorage periodically (fallback for same-tab updates)
+    const checkInterval = setInterval(() => {
+      const storedProfile = localStorage.getItem('currentProfile');
+      const lastUpdated = localStorage.getItem('profileLastUpdated');
+      if (storedProfile) {
+        try {
+          const parsed = JSON.parse(storedProfile);
+          // Only update if profile actually changed (check by comparing IDs or timestamps)
+          const currentProfileId = profile?.id || `${profile?.language?.id || 'unknown'}_${(typeof profile?.accent === 'object' ? profile?.accent?.name : profile?.accent)?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
+          const newProfileId = parsed.id || `${parsed.language?.id || 'unknown'}_${(typeof parsed.accent === 'object' ? parsed.accent?.name : parsed.accent)?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
+          if (currentProfileId !== newProfileId) {
+            setProfile(parsed);
+          }
+        } catch (error) {
+          // Ignore parse errors
+        }
+      }
+    }, 1000); // Check every second
+    
+    return () => {
+      window.removeEventListener('profileChanged', handleProfileChange);
+      window.removeEventListener('storage', handleStorageChange);
+      clearInterval(checkInterval);
+    };
+  }, [profile]);
   
   // Check if this is the first practice session (from initial test or survey)
   const isFirstPractice = fromInitialTest || fromSurvey;
@@ -41,15 +109,26 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   // Get custom phrases from props or location state
   const customPhrases = propCustomPhrases || locationCustomPhrases;
   
-  // Get language-specific practice phrases if no custom phrases provided
-  const defaultPhrases = profile?.language?.id 
-    ? getPracticePhrases(profile.language.id) 
-    : PRACTICE_PHRASES;
+  // Get language-specific practice phrases - recalculate when profile changes
+  const [phrases, setPhrases] = useState(() => {
+    const defaultPhrases = profile?.language?.id 
+      ? getPracticePhrases(profile.language.id) 
+      : PRACTICE_PHRASES;
+    const allPhrases = customPhrases || defaultPhrases;
+    return (isFirstPractice && !customPhrases) ? allPhrases.slice(0, 5) : allPhrases;
+  });
   
-  // Use custom phrases if provided, otherwise use default
-  // Limit to 5 questions only for first practice session (not for lesson-specific practice)
-  const allPhrases = customPhrases || defaultPhrases;
-  const phrases = (isFirstPractice && !customPhrases) ? allPhrases.slice(0, 5) : allPhrases;
+  // Update phrases when profile or language changes
+  useEffect(() => {
+    if (profile?.language?.id) {
+      const defaultPhrases = getPracticePhrases(profile.language.id);
+      const allPhrases = customPhrases || defaultPhrases;
+      const newPhrases = (isFirstPractice && !customPhrases) ? allPhrases.slice(0, 5) : allPhrases;
+      setPhrases(newPhrases);
+      // Reset to first phrase when language changes
+      setCurrentPhrase(0);
+    }
+  }, [profile?.language?.id, customPhrases, isFirstPractice]);
   const [currentPhrase, setCurrentPhrase] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);

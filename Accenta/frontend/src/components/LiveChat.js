@@ -7,7 +7,75 @@ import AudioReactiveAvatar from './AudioReactiveAvatar';
 const LiveChat = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { profile } = location.state || {};
+  const { profile: locationProfile } = location.state || {};
+  
+  // State for profile that can be updated dynamically
+  const [profile, setProfile] = useState(locationProfile);
+  
+  // Load profile from localStorage if not provided via location
+  useEffect(() => {
+    if (!profile) {
+      const storedProfile = localStorage.getItem('currentProfile');
+      if (storedProfile) {
+        try {
+          const parsed = JSON.parse(storedProfile);
+          setProfile(parsed);
+        } catch (error) {
+          console.error('Error parsing stored profile:', error);
+        }
+      }
+    }
+  }, []);
+  
+  // Listen for profile changes from dropdown
+  useEffect(() => {
+    const handleProfileChange = (event) => {
+      const newProfile = event.detail;
+      setProfile(newProfile);
+      console.log('🔄 Profile updated in LiveChat component:', {
+        language: typeof newProfile.language === 'object' ? newProfile.language?.name : newProfile.language,
+        accent: typeof newProfile.accent === 'object' ? newProfile.accent?.name : newProfile.accent
+      });
+    };
+    
+    const handleStorageChange = (event) => {
+      if (event.key === 'currentProfile') {
+        try {
+          const newProfile = JSON.parse(event.newValue);
+          setProfile(newProfile);
+        } catch (error) {
+          console.error('Error parsing profile from storage event:', error);
+        }
+      }
+    };
+    
+    window.addEventListener('profileChanged', handleProfileChange);
+    window.addEventListener('storage', handleStorageChange);
+    
+    // Also check localStorage periodically (fallback for same-tab updates)
+    const checkInterval = setInterval(() => {
+      const storedProfile = localStorage.getItem('currentProfile');
+      if (storedProfile) {
+        try {
+          const parsed = JSON.parse(storedProfile);
+          const currentProfileId = profile?.id || `${profile?.language?.id || 'unknown'}_${(typeof profile?.accent === 'object' ? profile?.accent?.name : profile?.accent)?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
+          const newProfileId = parsed.id || `${parsed.language?.id || 'unknown'}_${(typeof parsed.accent === 'object' ? parsed.accent?.name : parsed.accent)?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
+          if (currentProfileId !== newProfileId) {
+            setProfile(parsed);
+          }
+        } catch (error) {
+          // Ignore parse errors
+        }
+      }
+    }, 1000);
+    
+    return () => {
+      window.removeEventListener('profileChanged', handleProfileChange);
+      window.removeEventListener('storage', handleStorageChange);
+      clearInterval(checkInterval);
+    };
+  }, [profile]);
+  
   const [messages, setMessages] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
