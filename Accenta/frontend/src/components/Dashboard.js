@@ -345,6 +345,9 @@ const Dashboard = () => {
       profileManager.setCurrentProfile(selectedProfile);
       setCurrentProfile(selectedProfile);
       setIsLanguageDropdownOpen(false);
+      
+      // Dispatch event so other components (Practice.js, LiveChat.js) can listen
+      window.dispatchEvent(new CustomEvent('profileChanged', { detail: selectedProfile }));
     }
   };
 

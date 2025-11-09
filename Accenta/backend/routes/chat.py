@@ -235,15 +235,15 @@ Now respond naturally in {target_language} as Wally. Continue the conversation -
             if finish_reason in [2, 3]:  # 2 = SAFETY, 3 = RECITATION
                 logger.warning(f"⚠️ Gemini response blocked by safety filter (reason: {finish_reason})")
                 # Try to get partial text if available
-                if hasattr(candidate, 'content') and candidate.content:
-                    if hasattr(candidate.content, 'parts'):
-                        parts_text = []
-                        for part in candidate.content.parts:
-                            if hasattr(part, 'text') and part.text:
-                                parts_text.append(part.text)
-                        if parts_text:
-                            ai_response_text = " ".join(parts_text).strip()
-                            logger.info(f"✅ Extracted partial text despite safety block: '{ai_response_text[:50]}...'")
+            if hasattr(candidate, 'content') and candidate.content:
+                if hasattr(candidate.content, 'parts'):
+                    parts_text = []
+                    for part in candidate.content.parts:
+                        if hasattr(part, 'text') and part.text:
+                            parts_text.append(part.text)
+                    if parts_text:
+                        ai_response_text = " ".join(parts_text).strip()
+                        logger.info(f"✅ Extracted partial text despite safety block: '{ai_response_text[:50]}...'")
         
         # Try standard text extraction
         if not ai_response_text:
@@ -378,7 +378,7 @@ Respond in {target_language}."""
             return feedback_text
         else:
             return None
-            
+        
     except Exception as e:
         logger.warning(f"Failed to generate accent feedback: {e}")
         return None
@@ -440,7 +440,7 @@ async def chat_message_with_audio_upload(
                 last_request_time = _active_greeting_requests[session_id]
                 if current_time - last_request_time < 5.0:  # Within 5 seconds (increased from 2)
                     logger.warning(f"⚠️ Duplicate greeting request detected for session {session_id} - ignoring (last request {current_time - last_request_time:.2f}s ago)")
-                    raise HTTPException(
+                raise HTTPException(
                         status_code=429,
                         detail="Greeting request already in progress. Please wait."
                     )
@@ -561,10 +561,10 @@ async def chat_message_with_audio_upload(
                     unclear_response = "抱歉，我没听清楚。你能再说一遍吗？"
                 else:
                     unclear_response = "Could you repeat that?"
-            
-            return {
+                
+                return {
                 "transcribed_text": "",
-                "ai_message": unclear_response,
+                    "ai_message": unclear_response,
                 "accent_feedback": None,
                 "audio_base64": None
             }
@@ -597,6 +597,10 @@ async def chat_message_with_audio_upload(
         # Ensure we always have accent feedback (fallback if generation fails)
         if not accent_feedback:
             logger.warning("⚠️ Accent feedback generation returned None, using fallback")
+            # Generate dynamic fallback feedback based on accent and language
+            accent_lower = target_accent.lower() if target_accent else ""
+            is_american = "american" in accent_lower or "american english" in accent_lower
+            
             # Generate a simple fallback feedback in target language
             if target_language_name in ["Mandarin Chinese", "Chinese"]:
                 accent_feedback = f"另外，如果你想听起来更像{target_accent}，可以多注意一下发音的细节。"
@@ -613,7 +617,30 @@ async def chat_message_with_audio_upload(
             elif target_language_name == "Portuguese":
                 accent_feedback = f"Além disso, se você quiser soar mais como {target_accent}, preste atenção aos detalhes da pronúncia."
             else:
-                accent_feedback = f"Also, if you want to sound more like {target_accent}, pay attention to pronunciation details."
+                # English fallback - check for American English
+                if is_american:
+                    # American English-specific tips based on user's text
+                    user_lower = transcribed_text.lower() if transcribed_text else ""
+                    tips = []
+                    
+                    # Check for 'r' sounds (rhoticity)
+                    if 'r' in user_lower or any(word in user_lower for word in ['car', 'far', 'water', 'better', 'butter']):
+                        tips.append("pronounce all 'r' sounds clearly, like in 'car' and 'water'")
+                    
+                    # Check for 't' sounds (flapping)
+                    if 't' in user_lower and any(word in user_lower for word in ['water', 'better', 'butter', 'matter']):
+                        tips.append("remember that 't' between vowels sounds like 'd', so 'water' sounds like 'wader'")
+                    
+                    # Check for vowel sounds
+                    if any(vowel in user_lower for vowel in 'aeiou'):
+                        tips.append("make your vowel sounds more open and clear, like in 'can' and 'cat'")
+                    
+                    if tips:
+                        accent_feedback = f"Also, if you want to sound more like {target_accent}, {tips[0]}."
+                    else:
+                        accent_feedback = f"Also, if you want to sound more like {target_accent}, practice pronouncing all 'r' sounds clearly and make your vowels more open."
+                else:
+                    accent_feedback = f"Also, if you want to sound more like {target_accent}, pay attention to pronunciation details."
         
         logger.info(f"✅ Accent feedback ready: '{accent_feedback[:50]}...'")
         

@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
 import { chatService, ttsService } from '../services/api';
 import AudioReactiveAvatar from './AudioReactiveAvatar';
-import { profileManager } from '../utils/profileManager';
 
 const LiveChat = () => {
   const location = useLocation();
@@ -11,17 +10,22 @@ const LiveChat = () => {
   const { profile: locationProfile } = location.state || {};
   
   // State for profile that can be updated dynamically
-  const [profile, setProfile] = useState(() => locationProfile || profileManager.getCurrentProfile());
+  const [profile, setProfile] = useState(locationProfile);
   
   // Load profile from localStorage if not provided via location
   useEffect(() => {
     if (!profile) {
-      const storedProfile = profileManager.getCurrentProfile();
+      const storedProfile = localStorage.getItem('currentProfile');
       if (storedProfile) {
-        setProfile(storedProfile);
+        try {
+          const parsed = JSON.parse(storedProfile);
+          setProfile(parsed);
+        } catch (error) {
+          console.error('Error parsing stored profile:', error);
+        }
       }
     }
-  }, [profile]);
+  }, []);
   
   // Listen for profile changes from dropdown
   useEffect(() => {
@@ -35,13 +39,12 @@ const LiveChat = () => {
     };
     
     const handleStorageChange = (event) => {
-      if (
-        !event.key ||
-        ['currentProfile', 'currentProfileId', 'profileLastUpdated'].includes(event.key)
-      ) {
-        const newProfile = profileManager.getCurrentProfile();
-        if (newProfile) {
+      if (event.key === 'currentProfile') {
+        try {
+          const newProfile = JSON.parse(event.newValue);
           setProfile(newProfile);
+        } catch (error) {
+          console.error('Error parsing profile from storage event:', error);
         }
       }
     };
@@ -51,11 +54,17 @@ const LiveChat = () => {
     
     // Also check localStorage periodically (fallback for same-tab updates)
     const checkInterval = setInterval(() => {
-      const storedProfile = profileManager.getCurrentProfile();
+      const storedProfile = localStorage.getItem('currentProfile');
       if (storedProfile) {
-        const currentProfileId = profile?.id;
-        if (storedProfile.id && currentProfileId !== storedProfile.id) {
-          setProfile(storedProfile);
+        try {
+          const parsed = JSON.parse(storedProfile);
+          const currentProfileId = profile?.id || `${profile?.language?.id || 'unknown'}_${(typeof profile?.accent === 'object' ? profile?.accent?.name : profile?.accent)?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
+          const newProfileId = parsed.id || `${parsed.language?.id || 'unknown'}_${(typeof parsed.accent === 'object' ? parsed.accent?.name : parsed.accent)?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
+          if (currentProfileId !== newProfileId) {
+            setProfile(parsed);
+          }
+        } catch (error) {
+          // Ignore parse errors
         }
       }
     }, 1000);
@@ -168,7 +177,9 @@ const LiveChat = () => {
   // Get storage key for this conversation
   const getStorageKey = () => {
     if (!profile) return null;
-    return `live_chat_${profile.language}_${profile.accent}`;
+    const language = typeof profile.language === 'object' ? profile.language?.id || profile.language?.name : profile.language;
+    const accent = typeof profile.accent === 'object' ? profile.accent?.name : profile.accent;
+    return `live_chat_${language}_${accent}`;
   };
 
   // Load saved conversation
@@ -258,7 +269,8 @@ const LiveChat = () => {
         const message = messages.find(m => m.id === messageId);
         if (message && message.type === 'ai') {
           try {
-            const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+            const accentStr = typeof profile.accent === 'object' ? profile.accent.name : profile.accent;
+            const accentName = accentStr.toLowerCase().replace(' english', '').replace('english', '').trim();
             audioBlob = await ttsService.generateSpeech(message.text, null, accentName, true); // robotic=true for Wally
             
             // Store it for future replays
@@ -403,7 +415,8 @@ const LiveChat = () => {
         const regenerateMessageAudio = async () => {
           try {
             // Use TTS service to regenerate audio for the exact message text
-            const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+            const accentStr = typeof profile.accent === 'object' ? profile.accent.name : profile.accent;
+            const accentName = accentStr.toLowerCase().replace(' english', '').replace('english', '').trim();
             const audioBlob = await ttsService.generateSpeech(lastAIMessage.text, null, accentName, true); // robotic=true for Wally
             
             if (audioBlob) {
@@ -722,7 +735,8 @@ const LiveChat = () => {
         console.warn('No valid audio received from backend, generating TTS fallback...');
         // Fallback: generate TTS
         try {
-          const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+          const accentStr = typeof profile.accent === 'object' ? profile.accent.name : profile.accent;
+          const accentName = accentStr.toLowerCase().replace(' english', '').replace('english', '').trim();
           audioToPlay = await ttsService.generateSpeech(chatResponse.message, null, accentName, true);
           if (audioToPlay && audioToPlay.size > 0) {
             const newMap = new Map(messageAudioMap);
@@ -819,7 +833,8 @@ const LiveChat = () => {
         console.log('No audio received, generating TTS for message...');
         try {
           // Use robotic voice for Wally
-          const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+          const accentStr = typeof profile.accent === 'object' ? profile.accent.name : profile.accent;
+          const accentName = accentStr.toLowerCase().replace(' english', '').replace('english', '').trim();
           audioToPlay = await ttsService.generateSpeech(chatResponse.message, null, accentName, true); // robotic=true
           if (audioToPlay && audioToPlay.size > 0) {
             console.log('TTS generated successfully', { blobSize: audioToPlay.size, blobType: audioToPlay.type });
@@ -875,7 +890,8 @@ const LiveChat = () => {
         // Stop any currently playing audio first
         stopAllAudio();
         
-        const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+        const accentStr = typeof profile.accent === 'object' ? profile.accent.name : profile.accent;
+        const accentName = accentStr.toLowerCase().replace(' english', '').replace('english', '').trim();
         const audioBlob = await ttsService.generateSpeech(fallbackMessage.text, null, accentName, true); // robotic=true
         if (audioBlob) {
           const newMap = new Map(messageAudioMap);
@@ -1171,7 +1187,8 @@ const LiveChat = () => {
           if (!audioToPlay) {
             // Generate TTS if no audio provided
             try {
-              const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+              const accentStr = typeof profile.accent === 'object' ? profile.accent.name : profile.accent;
+              const accentName = accentStr.toLowerCase().replace(' english', '').replace('english', '').trim();
               audioToPlay = await ttsService.generateSpeech(initialMessage.text, null, accentName, true); // robotic=true for Wally
             } catch (ttsError) {
               console.error('Error generating TTS for cleared conversation greeting:', ttsError);
@@ -1231,7 +1248,7 @@ const LiveChat = () => {
               </svg>
               <span>Back to Dashboard</span>
             </button>
-            <h1 className="text-xl font-bold text-gray-900">Chat with Wally - {profile?.accent} Accent</h1>
+            <h1 className="text-xl font-bold text-gray-900">Chat with Wally - {typeof profile?.accent === 'object' ? profile?.accent?.name : profile?.accent || 'English'} Accent</h1>
             <div className="w-32"></div> {/* Spacer */}
           </div>
         </div>

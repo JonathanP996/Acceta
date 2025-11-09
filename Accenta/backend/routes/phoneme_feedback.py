@@ -364,6 +364,14 @@ Keep it encouraging, conversational, and easy to understand. Write as if you're 
             # Generate dynamic feedback from phoneme analysis and accent score
             full_feedback = ""
             
+            # Check if we're dealing with American English
+            is_american_english = False
+            if language:
+                lang_lower = language.lower()
+                is_american_english = lang_lower in ['en', 'en-us', 'english', 'american', 'american english']
+            elif 'american' in target_text.lower() or any(word in target_text.lower() for word in ['can', 'can\'t', 'water', 'better', 'butter']):
+                is_american_english = True
+            
             # Address accent evaluation score if provided
             if accent_evaluation_score is not None:
                 if accent_evaluation_score >= 85:
@@ -375,9 +383,41 @@ Keep it encouraging, conversational, and easy to understand. Write as if you're 
                 else:
                     full_feedback += f"Your accent evaluation score is {accent_evaluation_score:.0f}% - this needs significant improvement. Work on better replicating the target accent's characteristics. "
             
-            # Address phoneme-level differences
-            full_feedback += f"Your pronunciation of \"{target_text}\" was transcribed as \"{user_text}\". "
+            # Address phoneme-level differences with American English-specific guidance
+            full_feedback += f"You said \"{user_text}\" but should have said \"{target_text}\". "
             
+            # American English-specific feedback
+            if is_american_english:
+                # Check for common American English pronunciation issues
+                target_words = target_text.lower().split()
+                user_words = user_text.lower().split()
+                
+                # Common American English sound patterns
+                american_tips = []
+                
+                # Check for 'r' sounds (rhoticity - American English pronounces all 'r's)
+                if any('r' in word for word in target_words):
+                    if not any('r' in word for word in user_words) or len([w for w in user_words if 'r' in w]) < len([w for w in target_words if 'r' in w]):
+                        american_tips.append("In American English, pronounce all 'r' sounds clearly. Words like 'car', 'far', and 'water' should have a clear 'r' sound at the end.")
+                
+                # Check for 't' sounds (flapping - 't' between vowels sounds like 'd' in American English)
+                if any('t' in word and len(word) > 2 for word in target_words):
+                    american_tips.append("In American English, 't' sounds between vowels often sound like 'd'. For example, 'water' sounds like 'wader', and 'better' sounds like 'bedder'.")
+                
+                # Check for vowel sounds (American vowels are more open)
+                vowel_words = [w for w in target_words if any(v in w for v in 'aeiou')]
+                if vowel_words:
+                    american_tips.append("American English vowels are more open and clear. Make sure to fully pronounce vowel sounds, especially in words like 'can', 'cat', and 'hat'.")
+                
+                # Check for 'o' sounds (American 'o' is more rounded)
+                if any('o' in word for word in target_words):
+                    american_tips.append("American English 'o' sounds are more rounded. Words like 'go', 'no', and 'so' should have a clear, rounded 'o' sound.")
+                
+                # Add American English tips if we found issues
+                if american_tips:
+                    full_feedback += "Here are some American English pronunciation tips: " + " ".join(american_tips[:2]) + " "
+            
+            # General phoneme accuracy feedback
             if phoneme_analysis['similarity_score'] >= 0.95:
                 full_feedback += "Your phoneme accuracy is excellent - the sounds match very closely. "
             elif phoneme_analysis['similarity_score'] >= 0.8:
@@ -389,31 +429,65 @@ Keep it encouraging, conversational, and easy to understand. Write as if you're 
             
             full_feedback += f"Your phoneme similarity score is {phoneme_analysis['similarity_score']*100:.1f}%.\n\n"
             
+            # Add specific word-level corrections for American English
+            if is_american_english and user_text.lower() != target_text.lower():
+                # Find word differences
+                target_words_lower = [w.strip('.,!?') for w in target_text.lower().split()]
+                user_words_lower = [w.strip('.,!?') for w in user_text.lower().split()]
+                
+                word_corrections = []
+                for i, target_word in enumerate(target_words_lower):
+                    if i < len(user_words_lower):
+                        user_word = user_words_lower[i]
+                        if target_word != user_word and len(target_word) > 2:
+                            # Provide specific correction
+                            word_corrections.append(f"You said '{user_word}' instead of '{target_word}'. ")
+                
+                if word_corrections:
+                    full_feedback += "Specific word corrections: " + " ".join(word_corrections[:3]) + "\n\n"
+            
             # Add specific phoneme differences with word-level context
             if phoneme_analysis['differences']:
-                full_feedback += "**Specific Issues to Address**\n"
+                full_feedback += "Specific pronunciation issues: "
                 for diff in phoneme_analysis['differences'][:5]:
                     target_ph = diff.get('target_phonemes', '').strip()
                     user_ph = diff.get('user_phonemes', '').strip()
                     if diff.get('type') == 'phoneme_mismatch' and target_ph and user_ph:
-                        # Try to identify which word this might be from
-                        full_feedback += f"You pronounced the sound '{user_ph}' instead of '{target_ph}'. "
+                        full_feedback += f"You pronounced '{user_ph}' instead of '{target_ph}'. "
                     elif diff.get('type') == 'missing_phoneme' and target_ph:
-                        full_feedback += f"You're missing the sound '{target_ph}'. Make sure to include all the sounds in each word. "
+                        full_feedback += f"You're missing the '{target_ph}' sound. "
                     elif diff.get('type') == 'extra_phoneme' and user_ph:
-                        full_feedback += f"You added an extra sound '{user_ph}' that shouldn't be there. "
+                        full_feedback += f"You added an extra '{user_ph}' sound. "
                 full_feedback += "\n\n"
             else:
                 if phoneme_analysis['similarity_score'] >= 0.95:
                     full_feedback += "Your phoneme accuracy is spot-on! All the sounds match perfectly.\n\n"
             
-            # Practice recommendations removed per user request
+            # American English practice tips
+            if is_american_english:
+                practice_tips = []
+                if accent_evaluation_score is not None and accent_evaluation_score < 85:
+                    practice_tips.append("Practice pronouncing 'r' sounds clearly at the end of words like 'car', 'far', and 'water'.")
+                if phoneme_analysis['similarity_score'] < 0.9:
+                    practice_tips.append("Focus on matching the exact sounds in each word, especially vowel sounds which are more open in American English.")
+                practice_tips.append("Listen to American English speakers and pay attention to how they pronounce common words.")
+                
+                if practice_tips:
+                    full_feedback += "Practice tips for American English: " + " ".join(practice_tips[:2]) + "\n\n"
             
             # Extract improvements from differences
             specific_improvements = []
             for diff in phoneme_analysis['differences'][:5]:
                 if diff.get('issue'):
                     specific_improvements.append(diff.get('issue'))
+            
+            # Add American English-specific improvements
+            if is_american_english and len(specific_improvements) < 3:
+                if accent_evaluation_score is not None and accent_evaluation_score < 85:
+                    specific_improvements.append("Work on American English 'r' sounds - pronounce all 'r's clearly")
+                if phoneme_analysis['similarity_score'] < 0.9:
+                    specific_improvements.append("Focus on American English vowel sounds - they should be more open and clear")
+                specific_improvements.append("Practice American English pronunciation patterns like 't' flapping in words like 'water' and 'better'")
             
             if len(specific_improvements) == 0:
                 if accent_evaluation_score is not None and accent_evaluation_score < 85:

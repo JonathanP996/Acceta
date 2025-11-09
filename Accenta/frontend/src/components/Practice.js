@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
 import WaveformVisualization from './WaveformVisualization';
@@ -33,28 +33,38 @@ export const PRACTICE_PHRASES = [
 const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCurated }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const {
-    profile: locationProfile,
-    fromInitialTest,
-    fromSurvey,
-    customPhrases: locationCustomPhrases,
-    timedMode: locationTimedMode,
-    timedSettings: locationTimedSettings,
-  } = location.state || {};
+  const locationState = location.state || {};
+  const { profile: locationProfile, fromInitialTest, fromSurvey, customPhrases: locationCustomPhrases, timedMode: locationTimedMode } = locationState;
+  const timedSettings = locationState.timedSettings ? { ...locationState.timedSettings } : null;
   
   // State for profile that can be updated dynamically
-  const [profile, setProfile] = useState(() => propProfile || locationProfile || profileManager.getCurrentProfile());
+  const [profile, setProfile] = useState(propProfile || locationProfile);
   
   // Load profile from localStorage if not provided via props/location
   useEffect(() => {
     if (!profile) {
-      const storedProfile = profileManager.getCurrentProfile();
+      const storedProfile = localStorage.getItem('currentProfile');
       if (storedProfile) {
-        setProfile(storedProfile);
+        try {
+          const parsed = JSON.parse(storedProfile);
+          setProfile(parsed);
+        } catch (error) {
+          console.error('Error parsing stored profile:', error);
+        }
       }
     }
-  }, [profile]);
+  }, []);
   
+  // Update timedMode when location.state changes
+  useEffect(() => {
+    if (locationTimedMode !== undefined) {
+      setTimedMode(locationTimedMode);
+    }
+    if (timedSettings?.timeLimitSeconds) {
+      setTimeRemaining(timedSettings.timeLimitSeconds);
+    }
+  }, [locationTimedMode, timedSettings?.timeLimitSeconds]);
+
   // Listen for profile changes from dropdown
   useEffect(() => {
     const handleProfileChange = (event) => {
@@ -90,7 +100,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
           setProfile(storedProfile);
         }
       }
-    }, 1000); // Check every second
+    }, 1000);
     
     return () => {
       window.removeEventListener('profileChanged', handleProfileChange);
@@ -131,12 +141,8 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   const [audioCapture, setAudioCapture] = useState(null);
   const [audioData, setAudioData] = useState(null);
   const [showWaveform, setShowWaveform] = useState(false);
-  const [timedMode, setTimedMode] = useState(!!locationTimedMode);
-  const [timedSettings, setTimedSettings] = useState(locationTimedSettings || null);
-  const [timeRemaining, setTimeRemaining] = useState((locationTimedSettings && locationTimedSettings.timeLimitSeconds) || 30);
-  const [timerActive, setTimerActive] = useState(false);
-  const [timedOut, setTimedOut] = useState(false);
-  const [autoStartRecording, setAutoStartRecording] = useState(false);
+  const [timedMode, setTimedMode] = useState(locationTimedMode || false);
+  const [timeRemaining, setTimeRemaining] = useState(timedSettings?.timeLimitSeconds || 7);
   const timerRef = useRef(null);
   const audioRef = useRef(null);
   const feedbackAudioRef = useRef(null); // For phoneme feedback TTS audio
@@ -164,30 +170,6 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   const [phonemeFeedback, setPhonemeFeedback] = useState(null); // Store phoneme-level feedback
   const [isLoadingPhonemeFeedback, setIsLoadingPhonemeFeedback] = useState(false);
   const [isPlayingFeedbackTTS, setIsPlayingFeedbackTTS] = useState(false);
-
-  useEffect(() => {
-    if (locationTimedMode) {
-      setTimedMode(true);
-      setTimedSettings(locationTimedSettings || null);
-    }
-  }, [locationTimedMode, locationTimedSettings]);
-
-  const timeLimit = useMemo(
-    () => (timedSettings?.timeLimitSeconds ? Number(timedSettings.timeLimitSeconds) : 30),
-    [timedSettings]
-  );
-
-  useEffect(() => {
-    if (!timerActive) {
-      setTimeRemaining(timeLimit);
-    }
-  }, [timeLimit, timerActive]);
-
-  useEffect(() => {
-    if (timedMode) {
-      setUseFileUpload(false);
-    }
-  }, [timedMode]);
 
   // Load profile settings from localStorage
   useEffect(() => {
@@ -293,51 +275,12 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const timeoutHandledRef = useRef(false);
-
-  const handleTimeExpired = useCallback(() => {
-    if (!timedMode || timeoutHandledRef.current) {
-      return;
-    }
-    timeoutHandledRef.current = true;
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    setTimerActive(false);
-    setTimeRemaining(0);
-    setTimedOut(true);
-    setIsProcessing(false);
-    setShowWaveform(false);
-    setAudioData(null);
-    if (isRecording && audioCapture) {
-      try {
-        audioCapture.stopRecording();
-      } catch (error) {
-        console.error('Error stopping recording on timeout:', error);
-      }
-      setIsRecording(false);
-    }
-    setAnalysisResult({
-      timedOut: true,
-      message: 'Time expired before you could respond.',
-    });
-  }, [timedMode, audioCapture, isRecording]);
-
   useEffect(() => {
-    if (timedMode && timerActive) {
-      timeoutHandledRef.current = false;
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
+    if (timedMode && isRecording) {
       timerRef.current = setInterval(() => {
         setTimeRemaining((prev) => {
           if (prev <= 1) {
-            if (timerRef.current) {
-              clearInterval(timerRef.current);
-              timerRef.current = null;
-            }
-            handleTimeExpired();
+              stopRecording();
             return 0;
           }
           return prev - 1;
@@ -346,17 +289,17 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     } else {
       if (timerRef.current) {
         clearInterval(timerRef.current);
-        timerRef.current = null;
       }
+      setTimeRemaining(timedSettings?.timeLimitSeconds || 7);
     }
 
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
-        timerRef.current = null;
       }
     };
-  }, [timedMode, timerActive, handleTimeExpired]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timedMode, isRecording]);
 
   // Autoplay audio when phrase changes
   useEffect(() => {
@@ -528,15 +471,6 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
         setIsPlaying(false);
         setHasPlayedOnce(true);
         URL.revokeObjectURL(audioUrl);
-        if (timedMode) {
-          timeoutHandledRef.current = false;
-          setTimedOut(false);
-          setTimeRemaining(timeLimit);
-          setTimerActive(true);
-          if (!useFileUpload) {
-            setAutoStartRecording(true);
-          }
-        }
       };
       
       audio.onerror = (error) => {
@@ -631,35 +565,44 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
 
   const startRecording = () => {
     if (!audioCapture) return;
-    if (timedMode && timedOut) return;
     try {
       audioCapture.startRecording();
       setIsRecording(true);
-      if (timedMode && !timerActive) {
-        timeoutHandledRef.current = false;
-        setTimerActive(true);
-      }
     } catch (error) {
       console.error('Error starting recording:', error);
     }
   };
 
   const stopRecording = async () => {
-    if (!audioCapture || !isRecording) return;
-    
+    if (!audioCapture) {
+      console.warn('Cannot stop recording: audioCapture is null');
     setIsRecording(false);
-    setIsProcessing(true);
-    if (timedMode) {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      setTimerActive(false);
-      timeoutHandledRef.current = true;
+      return;
     }
+    
+    if (!isRecording) {
+      console.warn('Cannot stop recording: not currently recording');
+      return;
+    }
+    
+    setIsProcessing(true);
 
     try {
+      // Check if AudioCapture thinks it's recording before calling stop
+      if (!audioCapture.isRecording || !audioCapture.mediaRecorder) {
+        console.warn('AudioCapture state mismatch - resetting recording state');
+        setIsRecording(false);
+        setIsProcessing(false);
+        return;
+      }
+      
       const audioBlob = await audioCapture.stopRecording();
+      setIsRecording(false);
+      
+      if (!audioBlob || audioBlob.size === 0) {
+        throw new Error('Recording produced empty audio');
+      }
+      
       setAudioData(audioBlob);
       setShowWaveform(true);
       
@@ -742,6 +685,13 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
           setPhonemeFeedback(phonemeResult);
         } catch (error) {
           console.error('Error getting phoneme feedback:', error);
+          // Log detailed error information
+          if (error.message) {
+            console.error('Error message:', error.message);
+          }
+          if (error.response) {
+            console.error('Error response:', error.response.data);
+          }
           // Don't show error to user - phoneme feedback is optional
           setPhonemeFeedback(null);
         } finally {
@@ -752,17 +702,38 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     } catch (error) {
       console.error('Error detecting accent:', error);
       setIsProcessing(false);
+      setIsRecording(false);
+      
+      // Handle specific recording errors
+      if (error.message === 'Not recording' || error.message === 'MediaRecorder not initialized') {
+        console.warn('Recording state error - resetting state');
+        // Reset audio capture state
+        if (audioCapture) {
+          try {
+            audioCapture.cleanup();
+          } catch (cleanupError) {
+            console.error('Error cleaning up audio capture:', cleanupError);
+          }
+        }
+        // Try to reinitialize
+        const initAudio = async () => {
+          try {
+            const capture = new AudioCapture();
+            await capture.initialize();
+            setAudioCapture(capture);
+          } catch (initError) {
+            console.error('Error reinitializing audio capture:', initError);
+            alert('Microphone access is required. Please allow microphone access and try again.');
+          }
+        };
+        initAudio();
+        return;
+      }
+      
       const errorMessage = error.response?.data?.detail || error.message || 'Error detecting accent. Please try again.';
       alert(errorMessage);
     }
   };
-
-  useEffect(() => {
-    if (autoStartRecording) {
-      startRecording();
-      setAutoStartRecording(false);
-    }
-  }, [autoStartRecording]);
 
   const nextPhrase = () => {
     // Stop feedback TTS if playing
@@ -796,12 +767,6 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       setReferenceAudioBlob(null);
       setPhonemeFeedback(null);
       setIsPlayingFeedbackTTS(false);
-      setTimedOut(false);
-      setTimerActive(false);
-      timeoutHandledRef.current = false;
-      setTimeRemaining(timeLimit);
-      setAutoStartRecording(false);
-      setIsProcessing(false);
     } else {
       // Practice complete
       navigate('/dashboard', { state: { practiceComplete: true, isCurated } });
@@ -817,6 +782,11 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       
       // Combine feedback text into a natural script (exclude Practice Recommendations and Specific Areas)
       let feedbackText = phonemeFeedback.feedback || '';
+      
+      // Validate feedback text
+      if (!feedbackText || feedbackText.trim().length === 0) {
+        throw new Error('No feedback text available to play');
+      }
       
       // Remove "Practice Recommendations" section
       feedbackText = feedbackText.replace(/\*\*Practice Recommendations\*\*\s*\n/g, '');
@@ -840,9 +810,15 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       // Don't add specific improvements to TTS - user requested to exclude this
       
       // Get accent name for TTS (use profile accent or default to beijing)
-      const accentName = profile?.accent?.name || profile?.accent || "beijing";
+      const accentString = typeof profile?.accent === 'object' 
+        ? profile.accent?.name || profile.accent?.id 
+        : profile?.accent;
+      const accentName = accentString 
+        ? String(accentString).toLowerCase().replace(' english', '').replace('english', '').trim()
+        : "beijing";
       
       console.log('🎤 Generating TTS for phoneme feedback:', feedbackText.substring(0, 100));
+      console.log('🎤 Using accent:', accentName, 'from profile accent:', profile?.accent);
       
       // Generate speech using TTS service
       const audioBlob = await ttsService.generateSpeech(
@@ -855,6 +831,8 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       if (!audioBlob || audioBlob.size === 0) {
         throw new Error('Received empty audio blob from TTS service');
       }
+      
+      console.log('✅ TTS audio blob received:', { size: audioBlob.size, type: audioBlob.type });
       
       // Create audio element and play
       const audioUrl = URL.createObjectURL(audioBlob);
@@ -986,7 +964,32 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       });
       
       audio.volume = 1.0;
-      await audio.play();
+      
+      // Try to play audio with better error handling
+      try {
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          await playPromise;
+          console.log('✅ Feedback audio playback started successfully');
+        }
+      } catch (playError) {
+        console.error('Error playing feedback audio:', playError);
+        // If autoplay is blocked, try to resume audio context and play again
+        if (playError.name === 'NotAllowedError' && audioContext) {
+          try {
+            if (audioContext.state === 'suspended') {
+              await audioContext.resume();
+            }
+            await audio.play();
+            console.log('✅ Feedback audio playback started after context resume');
+          } catch (retryError) {
+            console.error('Error retrying audio playback:', retryError);
+            throw new Error('Audio playback blocked. Please interact with the page first.');
+          }
+        } else {
+          throw playError;
+        }
+      }
       
       // Start animation immediately after play() resolves
       if (analyser && !audio.paused) {
@@ -1032,7 +1035,60 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     } catch (error) {
       console.error('Error playing phoneme feedback TTS:', error);
       setIsPlayingFeedbackTTS(false);
-      alert('Failed to play feedback audio. Please try again.');
+      
+      // Clean up on error
+      if (feedbackAudioRef.current) {
+        try {
+          feedbackAudioRef.current.pause();
+          feedbackAudioRef.current = null;
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+      }
+      if (feedbackAnimationFrameRef.current) {
+        cancelAnimationFrame(feedbackAnimationFrameRef.current);
+        feedbackAnimationFrameRef.current = null;
+      }
+      if (feedbackAudioContextRef.current) {
+        feedbackAudioContextRef.current.close().catch(() => {});
+        feedbackAudioContextRef.current = null;
+      }
+      setFeedbackAudioLevels([]);
+      feedbackAnalyserRef.current = null;
+      
+      // Provide more specific error message
+      let errorMessage = 'Failed to play feedback audio. ';
+      if (error.message) {
+        if (error.message.includes('TTS') || error.message.includes('audio blob')) {
+          errorMessage += 'The audio could not be generated. ';
+        } else if (error.message.includes('playback blocked') || error.message.includes('NotAllowedError')) {
+          errorMessage += 'Please click on the page first to enable audio playback. ';
+        } else if (error.message.includes('Network error')) {
+          errorMessage += 'Could not connect to the TTS service. Make sure the backend is running. ';
+        } else {
+          errorMessage += error.message + ' ';
+        }
+      }
+      errorMessage += 'Please try again.';
+      
+      console.error('Detailed error:', {
+        message: error.message,
+        name: error.name,
+        stack: error.stack
+      });
+      
+      // Only show alert for critical errors, not for TTS failures (text feedback is still available)
+      if (error.message && (
+        error.message.includes('ElevenLabs API key') || 
+        error.message.includes('invalid or expired') ||
+        error.message.includes('Network error')
+      )) {
+        // Show alert for API key or network issues
+        alert(errorMessage);
+      } else {
+        // For other TTS errors, just log - text feedback is still available
+        console.warn('TTS playback failed, but text feedback is still available:', error.message);
+      }
     }
   };
 
@@ -1152,6 +1208,13 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
           setPhonemeFeedback(phonemeResult);
         } catch (error) {
           console.error('Error getting phoneme feedback:', error);
+          // Log detailed error information
+          if (error.message) {
+            console.error('Error message:', error.message);
+          }
+          if (error.response) {
+            console.error('Error response:', error.response.data);
+          }
           // Don't show error to user - phoneme feedback is optional
           setPhonemeFeedback(null);
         } finally {
@@ -1291,13 +1354,20 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
           {/* Static Content Section - Centered (takes available space, results expand below) */}
           <div className="flex-shrink-0 flex flex-col items-center justify-center relative" style={{ minHeight: '400px', paddingTop: '80px' }}>
             {/* Timer - Absolute positioned at top */}
-            {timedMode && timerActive && (
-              <div className="absolute top-0 left-1/2 transform -translate-x-1/2 mb-6 text-center">
-                <div className="inline-block bg-accenta-primary/20 rounded-full px-6 py-2 shadow-lg">
-                  <span className="text-accenta-primary text-2xl font-bold">{timeRemaining}s</span>
-                </div>
-                <div className="mt-2 text-sm text-white/80">
-                  {timedSettings?.label || 'Timed practice'} • {timeLimit}s per phrase
+            {timedMode && (
+              <div className="absolute top-0 left-1/2 transform -translate-x-1/2 mb-6 text-center z-10">
+                <div className={`inline-block rounded-full px-6 py-2 transition-all ${
+                  isRecording 
+                    ? 'bg-accenta-primary/20 animate-pulse' 
+                    : 'bg-gray-200/50'
+                }`}>
+                  <span className={`text-2xl font-bold ${
+                    isRecording 
+                      ? 'text-accenta-primary' 
+                      : 'text-gray-600'
+                  }`}>
+                    {timeRemaining}s
+                  </span>
                 </div>
               </div>
             )}
@@ -1312,10 +1382,10 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
             </div>
 
             {/* Replay Button - Below phrase */}
-            <div className={`flex justify-center mt-6 transition-opacity duration-300 ${hasPlayedOnce && !isPlaying && !timerActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+            <div className={`flex justify-center mt-6 transition-opacity duration-300 ${hasPlayedOnce && !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
               <button
                 onClick={playPhrase}
-                disabled={isRecording || isPlaying || !hasPlayedOnce || timerActive || timedOut}
+                disabled={isRecording || isPlaying || !hasPlayedOnce}
                 className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -1326,40 +1396,38 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
             </div>
 
             {/* Toggle between Microphone and File Upload */}
-            {!timedMode && (
-              <div className="flex justify-center gap-4 mt-4 mb-2">
-                <button
-                  onClick={() => setUseFileUpload(false)}
-                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                    !useFileUpload
-                      ? 'bg-accenta-primary text-white'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                  }`}
-                >
-                  🎤 Microphone
-                </button>
-                <button
-                  onClick={() => {
-                    setUseFileUpload(true);
-                    fileInputRef.current?.click();
-                  }}
-                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                    useFileUpload
-                      ? 'bg-accenta-primary text-white'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                  }`}
-                >
-                  📁 Upload File
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="audio/*,.mp3,.wav,.m4a,.flac,.webm,.ogg"
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
-              </div>
-            )}
+            <div className="flex justify-center gap-4 mt-4 mb-2">
+              <button
+                onClick={() => setUseFileUpload(false)}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                  !useFileUpload
+                    ? 'bg-accenta-primary text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                🎤 Microphone
+              </button>
+              <button
+                onClick={() => {
+                  setUseFileUpload(true);
+                  fileInputRef.current?.click();
+                }}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                  useFileUpload
+                    ? 'bg-accenta-primary text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                📁 Upload File
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*,.mp3,.wav,.m4a,.flac,.webm,.ogg"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+            </div>
 
             {/* Show uploaded file name */}
             {uploadedFile && (
@@ -1476,7 +1544,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
                 {!isRecording ? (
                   <button
                     onClick={startRecording}
-                    disabled={isPlaying || !audioCapture || (timedMode && timedOut)}
+                    disabled={isPlaying || !audioCapture}
                     className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
                   >
                     <svg className="w-8 h-8 text-gray-900" fill="currentColor" viewBox="0 0 20 20">

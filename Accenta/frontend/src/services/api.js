@@ -22,7 +22,7 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor for debugging blob responses
+// Response interceptor for debugging blob responses and handling JSON parsing errors
 api.interceptors.response.use(
   (response) => {
     // Log blob responses for debugging
@@ -40,6 +40,30 @@ api.interceptors.response.use(
   },
   (error) => {
     console.error('❌ Axios error:', error);
+    
+    // Handle JSON parsing errors (decoding failed)
+    if (error.message && (
+      error.message.includes('JSON') || 
+      error.message.includes('decoding') || 
+      error.message.includes('parse') ||
+      error.message.includes('Unexpected token') ||
+      error.message.includes('Invalid JSON')
+    )) {
+      console.error('❌ JSON parsing error detected:', {
+        url: error.config?.url,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        message: error.message
+      });
+      
+      // Create a more helpful error message
+      const decodingError = new Error('Server returned an invalid response format. This may indicate a backend error. Please check backend logs.');
+      decodingError.originalError = error;
+      decodingError.isDecodingError = true;
+      return Promise.reject(decodingError);
+    }
+    
     return Promise.reject(error);
   }
 );
@@ -138,13 +162,57 @@ export const accentDetectionService = {
       formData.append('accent_evaluation_score', accentEvaluationScore.toString());
     }
     
-    const response = await api.post(API_ENDPOINTS.PHONEME_FEEDBACK, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      timeout: 60000, // 60 second timeout for phoneme analysis
-    });
-    return response.data;
+    try {
+      const response = await api.post(API_ENDPOINTS.PHONEME_FEEDBACK, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: 60000, // 60 second timeout for phoneme analysis
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Phoneme feedback API error:', error);
+      
+      // Handle JSON parsing errors (decoding failed)
+      if (error.isDecodingError || (error.message && (error.message.includes('JSON') || error.message.includes('decoding') || error.message.includes('parse') || error.message.includes('invalid response format')))) {
+        console.error('JSON parsing error - response may not be valid JSON:', error);
+        if (error.originalError) {
+          console.error('Original error:', error.originalError);
+        }
+        throw new Error('Server returned an invalid response format. Please try again or check backend logs.');
+      }
+      
+      if (error.response) {
+        // Server responded with error status
+        console.error('Error response status:', error.response.status);
+        console.error('Error response data:', error.response.data);
+        console.error('Error response headers:', error.response.headers);
+        
+        // Try to extract error message from response
+        let errorMessage = 'Server error';
+        if (error.response.data) {
+          if (typeof error.response.data === 'string') {
+            // Response is a string (not JSON)
+            errorMessage = error.response.data;
+          } else if (error.response.data.detail) {
+            errorMessage = error.response.data.detail;
+          } else if (error.response.data.message) {
+            errorMessage = error.response.data.message;
+          } else {
+            errorMessage = `Server error: ${error.response.status} - ${error.response.statusText}`;
+          }
+        } else {
+          errorMessage = `Server error: ${error.response.status} - ${error.response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      } else if (error.request) {
+        // Request made but no response
+        throw new Error('Network error: Could not connect to phoneme feedback service. Make sure the backend is running.');
+      } else {
+        // Error setting up request
+        throw new Error(`Request error: ${error.message}`);
+      }
+    }
   },
 };
 

@@ -170,7 +170,24 @@ class AudioCapture {
 
   stopRecording() {
     return new Promise((resolve, reject) => {
-      if (!this.mediaRecorder || !this.isRecording) {
+      if (!this.mediaRecorder) {
+        console.warn('MediaRecorder is null, cannot stop recording');
+        reject(new Error('MediaRecorder not initialized'));
+        return;
+      }
+      
+      if (!this.isRecording) {
+        console.warn('Not currently recording, but attempting to stop');
+        // If we're not recording but mediaRecorder exists, try to clean up
+        if (this.mediaRecorder.state === 'recording') {
+          // MediaRecorder thinks it's recording, but our flag says otherwise
+          // Try to stop it anyway
+          try {
+            this.mediaRecorder.stop();
+          } catch (e) {
+            // Ignore errors
+          }
+        }
         reject(new Error('Not recording'));
         return;
       }

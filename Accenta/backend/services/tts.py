@@ -96,6 +96,16 @@ async def text_to_speech(
         logger.info(f"Generated TTS audio: {len(audio_bytes)} bytes")
         return audio_bytes
         
+    except requests.exceptions.HTTPError as http_err:
+        if http_err.response and http_err.response.status_code == 401:
+            logger.error(f"ElevenLabs API authentication failed (401): Invalid or expired API key")
+            raise Exception("ElevenLabs API key is invalid or expired. Please check your API key configuration.")
+        elif http_err.response and http_err.response.status_code == 429:
+            logger.error(f"ElevenLabs API rate limit exceeded (429)")
+            raise Exception("ElevenLabs API rate limit exceeded. Please try again later.")
+        else:
+            logger.error(f"TTS generation failed with HTTP error: {http_err}")
+            raise Exception(f"TTS error: {str(http_err)}")
     except Exception as e:
         logger.error(f"TTS generation failed: {e}")
         raise Exception(f"TTS error: {str(e)}")
