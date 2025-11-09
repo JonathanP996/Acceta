@@ -12,7 +12,7 @@ from typing import Optional, List, Dict, Any
 import google.generativeai as genai
 
 from services.transcribe import transcribe_audio
-from services.phoneme_analyzer import analyze_pronunciation
+from services.phoneme_analyzer import analyze_pronunciation, extract_phonemes
 
 logger = logging.getLogger(__name__)
 
@@ -453,5 +453,116 @@ Keep it encouraging, conversational, and easy to understand. Write as if you're 
         raise HTTPException(
             status_code=500,
             detail=f"Failed to analyze phoneme pronunciation: {str(e)}"
+        )
+
+
+class TranscriptionPhonemeResponse(BaseModel):
+    """Response model for simple transcription + phoneme extraction"""
+    transcribed_text: str
+    detected_language: str
+    phonemes: str
+    language: str
+
+
+@router.post("/transcribe", response_model=TranscriptionPhonemeResponse)
+async def transcribe_and_extract_phonemes(
+    audio_file: UploadFile = File(..., description="Audio file to transcribe"),
+    language: Optional[str] = Form(None, description="Language code (e.g., 'en', 'zh', 'es')"),
+    expected_language: Optional[str] = Form(None, description="Expected language for phoneme extraction (defaults to detected language)")
+):
+    """
+    Simple endpoint: Transcribe audio with Whisper and extract phonemes
+    
+    Pipeline:
+    1. Transcribe audio with Whisper
+    2. Extract phonemes from transcription
+    
+    Args:
+        audio_file: Audio file to transcribe
+        language: Optional language hint for Whisper (e.g., 'en', 'zh', 'es')
+        expected_language: Optional language code for phoneme extraction (defaults to detected language)
+    
+    Returns:
+        Transcription text, detected language, and phoneme sequence
+    """
+    start_time = time.time()
+    
+    try:
+        logger.info("🎯 Starting transcription and phoneme extraction")
+        
+        # Step 1: Read audio file
+        audio_bytes = await audio_file.read()
+        
+        if not audio_bytes or len(audio_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Empty audio file")
+        
+        logger.info(f"✅ Read audio file: {len(audio_bytes)} bytes")
+        
+        # Step 2: Transcribe with Whisper
+        logger.info("🔄 Transcribing audio with Whisper...")
+        transcription_result = await transcribe_audio(audio_bytes, language=language)
+        
+        if not transcription_result or not isinstance(transcription_result, dict):
+            raise HTTPException(
+                status_code=500,
+                detail="Whisper transcription returned invalid format"
+            )
+        
+        transcribed_text = transcription_result.get("transcribed_text", "")
+        detected_language = transcription_result.get("language", language or "en")
+        
+        if not transcribed_text or len(transcribed_text.strip()) < 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not transcribe audio - audio may be too quiet or unclear"
+            )
+        
+        logger.info(f"✅ Transcribed: '{transcribed_text}' (detected language: {detected_language})")
+        
+        # Step 3: Extract phonemes
+        logger.info("🔄 Extracting phonemes...")
+        # Use expected_language if provided, otherwise use detected language
+        phoneme_language = expected_language or detected_language
+        
+        # Convert language code to phonemizer format if needed
+        # phonemizer uses codes like 'en-us', 'es', 'fr', etc.
+        if phoneme_language:
+            # Map common language codes
+            lang_map = {
+                'english': 'en',
+                'spanish': 'es',
+                'french': 'fr',
+                'german': 'de',
+                'italian': 'it',
+                'portuguese': 'pt',
+                'mandarin': 'zh',
+                'chinese': 'zh',
+                'japanese': 'ja'
+            }
+            phoneme_language = lang_map.get(phoneme_language.lower(), phoneme_language.lower())
+            # For English, use 'en-us' for phonemizer
+            if phoneme_language == 'en':
+                phoneme_language = 'en-us'
+        
+        phonemes = extract_phonemes(transcribed_text, language=phoneme_language or "en-us")
+        
+        total_time = time.time() - start_time
+        logger.info(f"✅ Transcription and phoneme extraction complete ({total_time:.2f}s)")
+        logger.info(f"   Phonemes: {phonemes[:100]}...")
+        
+        return TranscriptionPhonemeResponse(
+            transcribed_text=transcribed_text,
+            detected_language=detected_language,
+            phonemes=phonemes,
+            language=phoneme_language or detected_language
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in transcription and phoneme extraction: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to transcribe and extract phonemes: {str(e)}"
         )
 

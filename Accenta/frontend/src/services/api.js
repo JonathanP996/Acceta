@@ -345,6 +345,8 @@ export const chatService = {
       pronunciation_score: response.data.pronunciation_score,
       pronunciation_feedback: response.data.pronunciation_feedback,
       struggle_areas: response.data.struggle_areas || [],
+      accent_evaluation_score: response.data.accent_evaluation_score || null,
+      accent_feedback: response.data.accent_feedback || null,
     };
   },
 };

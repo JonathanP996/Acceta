@@ -554,11 +554,11 @@ const Dashboard = () => {
             <div className="flex items-center gap-4">
               {/* Language Dropdown */}
               <div className="relative" ref={languageDropdownRef}>
-                <button
+                  <button
                   onClick={() => setIsLanguageDropdownOpen(!isLanguageDropdownOpen)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-white/20 bg-white/10 hover:bg-white/20 text-white/90 hover:text-white transition-colors font-medium"
-                >
-                  <span>
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-white/20 bg-white/10 hover:bg-white/20 text-white/90 hover:text-white transition-colors font-medium"
+                  >
+                    <span>
                     {currentProfile ? (
                       <>
                         {typeof currentProfile.language === 'object' 
@@ -568,19 +568,19 @@ const Dashboard = () => {
                     ) : (
                       'Select Language'
                     )}
-                  </span>
-                  <svg 
+                    </span>
+                    <svg 
                     className={`w-4 h-4 transition-transform ${isLanguageDropdownOpen ? 'rotate-180' : ''}`}
-                    fill="none" 
-                    stroke="currentColor" 
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
+                      fill="none" 
+                      stroke="currentColor" 
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
                 {isLanguageDropdownOpen && (
                   <div className={`absolute right-0 mt-2 w-72 bg-white rounded-lg shadow-xl border-2 ${currentColorScheme.border} z-50 max-h-96 overflow-y-auto`}>
-                    <div className="p-2">
+                      <div className="p-2">
                       {LANGUAGES.map((language) => {
                         const progress = getLanguageProgress(language.id);
                         const isCurrent = currentProfile && (
@@ -588,30 +588,30 @@ const Dashboard = () => {
                             ? currentProfile.language?.id === language.id
                             : currentProfile.language === language.id
                         );
-                        
-                        return (
-                          <button
+                          
+                          return (
+                            <button
                             key={language.id}
                             onClick={() => handleLanguageSelect(language)}
-                            className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${
-                              isCurrent 
-                                ? `${currentColorScheme.bgColor} ${currentColorScheme.textColor} font-semibold` 
-                                : 'hover:bg-gray-100 text-gray-700'
-                            }`}
-                          >
+                              className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${
+                                isCurrent 
+                                  ? `${currentColorScheme.bgColor} ${currentColorScheme.textColor} font-semibold` 
+                                  : 'hover:bg-gray-100 text-gray-700'
+                              }`}
+                            >
                             <div className="flex items-center justify-between mb-2">
                               <div className="flex items-center gap-3">
                                 <span className="text-2xl">{language.flag}</span>
                                 <div>
                                   <p className="font-medium">{language.name}</p>
                                 </div>
+                                </div>
+                                {isCurrent && (
+                                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                  </svg>
+                                )}
                               </div>
-                              {isCurrent && (
-                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                </svg>
-                              )}
-                            </div>
                             <div className="ml-11">
                               <div className="flex items-center justify-between mb-1">
                                 <span className="text-xs text-gray-500">Progress</span>
@@ -629,13 +629,13 @@ const Dashboard = () => {
                                 />
                               </div>
                             </div>
-                          </button>
-                        );
-                      })}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
               <button
                 onClick={handleStartNew}
                 className="text-white/90 hover:text-white font-medium transition-colors px-4 py-2 flex items-center gap-2"

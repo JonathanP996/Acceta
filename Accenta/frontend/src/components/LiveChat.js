@@ -97,6 +97,8 @@ const LiveChat = () => {
   const pendingAudioRef = useRef(null); // Ref to track pending audio element
   const allAudioRefs = useRef([]); // Track all audio instances to stop them
   const isPlayingRef = useRef(false); // Guard to prevent multiple simultaneous playbacks
+  const isGeneratingGreetingRef = useRef(false); // Guard to prevent multiple concurrent greeting calls
+  const hasGeneratedGreetingRef = useRef(false); // Track if greeting has been generated
   const initAudioRef = useRef(false); // Track if audio capture has been initialized
   const replayingMessageIdRef = useRef(null); // Track which message is currently being replayed
   const [profileSettings, setProfileSettings] = useState({
@@ -106,12 +108,12 @@ const LiveChat = () => {
   // Load profile settings from localStorage
   useEffect(() => {
     const savedSettings = localStorage.getItem('profileSettings');
-    if (savedSettings) {
-      try {
-        const parsed = JSON.parse(savedSettings);
-        setProfileSettings(parsed);
-      } catch (error) {
-        console.error('Error loading profile settings:', error);
+      if (savedSettings) {
+        try {
+          const parsed = JSON.parse(savedSettings);
+          setProfileSettings(parsed);
+        } catch (error) {
+          console.error('Error loading profile settings:', error);
       }
     }
   }, []);
@@ -384,6 +386,11 @@ const LiveChat = () => {
       return;
     }
 
+    // Prevent multiple concurrent greeting generations
+    if (hasGeneratedGreetingRef.current || isGeneratingGreetingRef.current) {
+      return;
+    }
+
     // Try to load saved conversation
     const saved = loadSavedConversation();
     if (saved && saved.messages.length > 0) {
@@ -391,6 +398,7 @@ const LiveChat = () => {
       setMessages(saved.messages);
       conversationHistory.current = saved.conversationHistory;
       setIsRestored(true);
+      hasGeneratedGreetingRef.current = true; // Mark as generated to prevent duplicate calls
       
       // Clear the restored flag after a few seconds
       setTimeout(() => setIsRestored(false), 3000);
@@ -420,56 +428,93 @@ const LiveChat = () => {
         regenerateMessageAudio();
       }
     } else {
-      // Start new conversation - simple greeting that plays automatically
-      const greetingText = "Is there anything you want to talk about right now?";
-      const initialMessageId = Date.now();
-      const initialMessage = {
-        id: initialMessageId,
-        type: 'ai',
-        text: greetingText,
-        timestamp: new Date(),
-      };
-      setMessages([initialMessage]);
-      conversationHistory.current = [
-        { role: 'assistant', content: greetingText }
-      ];
-      setCurrentAIMessage(greetingText);
+      // Start new conversation - generate greeting in target language from backend
+      // Set guard to prevent concurrent calls
+      if (isGeneratingGreetingRef.current) {
+        return;
+      }
+      isGeneratingGreetingRef.current = true;
+      hasGeneratedGreetingRef.current = true;
       
-      // Generate and play TTS immediately (same as practice mode) - but only once
-      const playGreeting = async () => {
-        // Guard: only play if we haven't played the initial greeting yet
-        if (hasPlayedInitialGreeting.current) {
-          console.log('Initial greeting already played, skipping...');
-          return;
-        }
+      const generateGreeting = async () => {
+        // CRITICAL: Set processing IMMEDIATELY to block all interactions
+        setIsProcessing(true);
         
         try {
-          // Mark as played BEFORE async operations to prevent race conditions
-          hasPlayedInitialGreeting.current = true;
+          // Get language ID for backend
+          const languageId = typeof profile.language === 'object' 
+            ? profile.language.id 
+            : profile.language || 'english';
           
-          // Stop any existing audio first
-          stopAllAudio();
+          // Call backend to generate greeting in target language (empty audio triggers greeting)
+          const user = JSON.parse(localStorage.getItem('user'));
+          const emptyAudio = new Blob([], { type: 'audio/wav' });
+          const response = await chatService.sendMessageWithAudioUpload(
+            emptyAudio,
+            {
+              user_id: user.user_id,
+              language: languageId,
+              target_accent: typeof profile.accent === 'object' ? profile.accent.name : profile.accent,
+            },
+            [] // Empty history for initial greeting
+          );
           
-          const accentName = profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
-          const audioBlob = await ttsService.generateSpeech(greetingText, null, accentName, true); // robotic=true for Wally
-          
-          if (audioBlob) {
-            // Store audio for replay
-            const newMap = new Map(messageAudioMap);
-            newMap.set(initialMessageId, audioBlob);
+          const greetingText = response.message || "Hello! How can I help you today?";
+          const initialMessageId = Date.now();
+          const initialMessage = {
+            id: initialMessageId,
+            type: 'ai',
+            text: greetingText,
+            timestamp: new Date(),
+          };
+          setMessages([initialMessage]);
+          conversationHistory.current = [
+            { role: 'assistant', content: greetingText }
+          ];
+          setCurrentAIMessage(greetingText);
+      
+          // Play greeting audio if available
+          if (response.audio && response.audio.size > 0) {
+            hasPlayedInitialGreeting.current = true;
+            const newMap = new Map();
+            newMap.set(initialMessageId, response.audio);
             setMessageAudioMap(newMap);
-            
-            // Use centralized audio playback
-            await playAIResponseAudio(audioBlob);
+            await playAIResponseAudio(response.audio);
+          } else {
+            // Fallback: generate TTS
+            const accentName = typeof profile.accent === 'object' 
+              ? profile.accent.name.toLowerCase().replace(' english', '').replace('english', '').trim()
+              : profile.accent.toLowerCase().replace(' english', '').replace('english', '').trim();
+            const audioBlob = await ttsService.generateSpeech(greetingText, null, accentName, true);
+            if (audioBlob && audioBlob.size > 0) {
+              hasPlayedInitialGreeting.current = true;
+              const newMap = new Map();
+              newMap.set(initialMessageId, audioBlob);
+              setMessageAudioMap(newMap);
+              await playAIResponseAudio(audioBlob);
+            }
           }
         } catch (error) {
-          console.error('Error generating/playing greeting TTS:', error);
-          // Reset flag on error so user can try again
-          hasPlayedInitialGreeting.current = false;
+          console.error('Error generating initial greeting:', error);
+          // Fallback to simple greeting
+          const greetingText = "Hello! How can I help you today?";
+          const initialMessageId = Date.now();
+          const initialMessage = {
+            id: initialMessageId,
+            type: 'ai',
+            text: greetingText,
+            timestamp: new Date(),
+          };
+          setMessages([initialMessage]);
+          conversationHistory.current = [{ role: 'assistant', content: greetingText }];
+          setCurrentAIMessage(greetingText);
+        } finally {
+          // Always clear the generating flag
+          isGeneratingGreetingRef.current = false;
         }
       };
       
-      playGreeting();
+      generateGreeting();
     }
 
     // Initialize audio capture on mount
@@ -496,14 +541,28 @@ const LiveChat = () => {
   }, [messages]);
 
   const toggleRecording = () => {
+    // Allow stopping recording even if processing/playing
     if (isRecording) {
       stopListening();
-    } else {
-      startListening();
+      return;
     }
+    
+    // Prevent starting new recording while processing or audio is playing
+    if (isProcessing || isAISpeaking || isPlayingRef.current) {
+      console.warn('Cannot start recording: processing request or audio is playing');
+      return;
+    }
+    
+    startListening();
   };
 
   const startListening = () => {
+    // Prevent starting if not ready
+    if (isProcessing || isAISpeaking || isPlayingRef.current) {
+      console.warn('Cannot start recording: processing request or audio is playing');
+      return;
+    }
+    
     if (!audioCapture) {
       console.error('Audio capture not initialized');
       alert('Microphone not initialized. Please refresh the page and try again.');
@@ -548,10 +607,13 @@ const LiveChat = () => {
   const stopListening = async () => {
     if (!audioCapture || !isRecording) return;
     
+    // CRITICAL: Set processing IMMEDIATELY to block all interactions
+    setIsProcessing(true);
     setIsRecording(false);
     setIsListening(false);
-    setIsProcessing(true);
     setRecordingVolume(0); // Reset volume
+
+    let willPlayAudio = false; // Track if we'll play audio (needs to be accessible in finally)
 
     try {
       const audioBlob = await audioCapture.stopRecording();
@@ -586,12 +648,17 @@ const LiveChat = () => {
         (async () => {
           try {
             console.log('🔄 [FRONTEND] Calling sendMessageWithAudioUpload...');
+            // Get language ID for backend
+            const languageId = typeof profile.language === 'object' 
+              ? profile.language.id 
+              : profile.language || 'english';
+            
             const response = await chatService.sendMessageWithAudioUpload(
               audioBlob,
               {
                 user_id: user.user_id,
-                language: profile.language,
-                target_accent: profile.accent,
+                language: languageId,
+                target_accent: typeof profile.accent === 'object' ? profile.accent.name : profile.accent,
               },
               historyForAPI
             );
@@ -614,13 +681,15 @@ const LiveChat = () => {
       // Get transcribed text
       const userText = chatResponse.transcribed_text || 'I said something...';
       
-      // Add user message
+      // Add user message with accent feedback
       const userMessage = {
         id: Date.now(),
         type: 'user',
         text: userText,
         timestamp: new Date(),
         pronunciationScore: chatResponse.pronunciation_score || null,
+        accentEvaluationScore: chatResponse.accent_evaluation_score || null,
+        accentFeedback: chatResponse.accent_feedback || null,
       };
       setMessages(prev => [...prev, userMessage]);
       conversationHistory.current.push({ role: 'user', content: userText });
@@ -632,6 +701,9 @@ const LiveChat = () => {
         type: 'ai',
         text: chatResponse.message,
         timestamp: new Date(),
+        // Store accent feedback from the user's previous message
+        accentFeedback: chatResponse.accent_feedback || null,
+        accentEvaluationScore: chatResponse.accent_evaluation_score || null,
       };
       setMessages(prev => [...prev, aiMessage]);
       conversationHistory.current.push({ role: 'assistant', content: chatResponse.message });
@@ -653,6 +725,7 @@ const LiveChat = () => {
         // Stop any currently playing audio first and wait for cleanup
         stopAllAudio();
         await new Promise(resolve => setTimeout(resolve, 100)); // Ensure cleanup completes
+        willPlayAudio = true;
         await playAIResponseAudio(audioToPlay);
       } else {
         console.warn('No valid audio received from backend, generating TTS fallback...');
@@ -665,6 +738,7 @@ const LiveChat = () => {
             newMap.set(aiMessageId, audioToPlay);
             setMessageAudioMap(newMap);
             stopAllAudio();
+            willPlayAudio = true;
             await playAIResponseAudio(audioToPlay);
           }
         } catch (ttsError) {
@@ -697,8 +771,12 @@ const LiveChat = () => {
       
       alert(errorMessage);
     } finally {
-      // Always clear processing state, even if there was an error or timeout
-      setIsProcessing(false);
+      // Only clear processing state if we're NOT playing audio
+      // If audio is playing, let the audio's onended handler clear it
+      if (!willPlayAudio && !isAISpeaking && !isPlayingRef.current) {
+        setIsProcessing(false);
+      }
+      // If audio is playing, isProcessing will be cleared when audio finishes (in onended handler)
     }
   };
 
@@ -872,6 +950,7 @@ const LiveChat = () => {
         setPendingAudio(null);
         pendingAudioRef.current = null;
         isPlayingRef.current = false;
+        setIsProcessing(false); // Clear processing flag when audio finishes
         replayingMessageIdRef.current = null;
         allAudioRefs.current = allAudioRefs.current.filter(a => a !== audio);
         if (currentAudioRef.current === audio) {
@@ -885,6 +964,7 @@ const LiveChat = () => {
         setIsAISpeaking(false);
         setCurrentAudioBlob(null);
         isPlayingRef.current = false;
+        setIsProcessing(false); // Clear processing flag on error
         replayingMessageIdRef.current = null;
         allAudioRefs.current = allAudioRefs.current.filter(a => a !== audio);
         if (currentAudioRef.current === audio) {
@@ -1060,6 +1140,14 @@ const LiveChat = () => {
       conversationHistory.current = [];
       setIsRestored(false);
       hasPlayedInitialGreeting.current = false; // Reset so we can play the new intro
+      hasGeneratedGreetingRef.current = false; // Reset greeting flag
+      
+      // Prevent concurrent greeting generation
+      if (isGeneratingGreetingRef.current) {
+        return;
+      }
+      isGeneratingGreetingRef.current = true;
+      hasGeneratedGreetingRef.current = true;
       
       // Generate exactly ONE new intro greeting
       const generateInitialGreeting = async () => {
@@ -1110,6 +1198,9 @@ const LiveChat = () => {
           }
         } catch (error) {
           console.error('Error generating initial greeting:', error);
+        } finally {
+          // Always clear the generating flag
+          isGeneratingGreetingRef.current = false;
         }
       };
       
@@ -1179,8 +1270,30 @@ const LiveChat = () => {
           {/* Audio-Reactive Avatar - Clickable to start/stop recording */}
           <div className="mb-8">
             <div 
-              onClick={toggleRecording}
-              className="cursor-pointer transition-transform hover:scale-105 active:scale-95"
+              onClick={(e) => {
+                // Completely block clicks when processing or speaking
+                if (!isRecording && (isProcessing || isAISpeaking || isPlayingRef.current)) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  return;
+                }
+                toggleRecording();
+              }}
+              className={`transition-transform ${
+                !isRecording && (isProcessing || isAISpeaking || isPlayingRef.current)
+                  ? 'cursor-not-allowed opacity-50 pointer-events-none' 
+                  : 'cursor-pointer hover:scale-105 active:scale-95'
+              }`}
+              style={{
+                pointerEvents: !isRecording && (isProcessing || isAISpeaking || isPlayingRef.current) ? 'none' : 'auto'
+              }}
+              title={
+                !isRecording && (isProcessing || isAISpeaking || isPlayingRef.current)
+                  ? 'Please wait for Wally to finish speaking or processing...'
+                  : isRecording
+                  ? 'Click to stop recording'
+                  : 'Click to start recording'
+              }
             >
               <AudioReactiveAvatar
                 audioBlob={currentAudioBlob}
@@ -1232,6 +1345,37 @@ const LiveChat = () => {
                     ) : null;
                   })()}
                 </div>
+                
+                {/* Accent Feedback after Wally's response */}
+                {(() => {
+                  const currentMessage = messages.filter(m => m.type === 'ai' && m.text === currentAIMessage).pop();
+                  if (currentMessage && currentMessage.accentFeedback) {
+                    return (
+                      <div className="mt-4 pt-4 border-t border-gray-200">
+                        <div className="flex items-center gap-2 mb-2">
+                          <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <span className="text-sm font-semibold text-gray-700">Accent Feedback</span>
+                          {currentMessage.accentEvaluationScore !== null && (
+                            <span className={`text-sm font-bold ml-auto ${
+                              currentMessage.accentEvaluationScore >= 85 ? 'text-green-600' :
+                              currentMessage.accentEvaluationScore >= 70 ? 'text-yellow-600' :
+                              currentMessage.accentEvaluationScore >= 50 ? 'text-orange-600' :
+                              'text-red-600'
+                            }`}>
+                              {currentMessage.accentEvaluationScore.toFixed(0)}%
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-600 leading-relaxed">
+                          {currentMessage.accentFeedback}
+                        </p>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             </div>
           )}

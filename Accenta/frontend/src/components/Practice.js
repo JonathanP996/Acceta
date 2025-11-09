@@ -111,9 +111,9 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   
   // Get language-specific practice phrases - recalculate when profile changes
   const [phrases, setPhrases] = useState(() => {
-    const defaultPhrases = profile?.language?.id 
-      ? getPracticePhrases(profile.language.id) 
-      : PRACTICE_PHRASES;
+  const defaultPhrases = profile?.language?.id 
+    ? getPracticePhrases(profile.language.id) 
+    : PRACTICE_PHRASES;
     const allPhrases = customPhrases || defaultPhrases;
     return (isFirstPractice && !customPhrases) ? allPhrases.slice(0, 5) : allPhrases;
   });
@@ -122,7 +122,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   useEffect(() => {
     if (profile?.language?.id) {
       const defaultPhrases = getPracticePhrases(profile.language.id);
-      const allPhrases = customPhrases || defaultPhrases;
+  const allPhrases = customPhrases || defaultPhrases;
       const newPhrases = (isFirstPractice && !customPhrases) ? allPhrases.slice(0, 5) : allPhrases;
       setPhrases(newPhrases);
       // Reset to first phrase when language changes
@@ -639,7 +639,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       setTimeout(() => {
         setBarWidth(Math.min(accentEvaluationScore || 0, 100));
       }, 300);
-      
+
       // Get phoneme-level feedback if reference audio is available
       if (referenceAudioBlob && audioBlob) {
         setIsLoadingPhonemeFeedback(true);
@@ -1078,7 +1078,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     // Reset input so same file can be selected again
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
-    }
+  }
   };
 
   return (

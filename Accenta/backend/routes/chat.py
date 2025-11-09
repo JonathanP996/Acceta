@@ -6,6 +6,7 @@ AI conversation endpoint for live chat mode
 import logging
 import json
 import re
+import time
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -32,7 +33,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 GEMINI_AVAILABLE = False
 GEMINI_STATUS = "not_configured"
 GEMINI_ERROR = None
-GEMINI_MODEL_NAME = "gemini-1.5-flash-latest"  # Default model name, will be set during initialization
+GEMINI_MODEL_NAME = "gemini-1.5-flash-latest"
 
 try:
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -43,18 +44,15 @@ try:
             logger.warning("Google API key is placeholder or empty - chat will use fallback responses")
         else:
             genai.configure(api_key=api_key)
-            # Test the connection with a simple call
             try:
-                # Try different model names in order of preference (must include models/ prefix)
                 model_names = [
-                    "models/gemini-2.5-flash",  # Latest fast model
-                    "models/gemini-2.0-flash",  # Fast model
-                    "models/gemini-flash-latest",  # Latest flash
-                    "models/gemini-1.5-flash",  # Stable fallback
-                    "models/gemini-pro-latest",  # Latest pro
+                    "models/gemini-2.5-flash",
+                    "models/gemini-2.0-flash",
+                    "models/gemini-flash-latest",
+                    "models/gemini-1.5-flash",
+                    "models/gemini-pro-latest",
                 ]
                 test_success = False
-                working_model = None
                 
                 for model_name in model_names:
                     try:
@@ -63,8 +61,6 @@ try:
                         if test_response and test_response.text:
                             GEMINI_AVAILABLE = True
                             GEMINI_STATUS = "connected"
-                            working_model = model_name
-                            # Store the working model name globally (update the module-level variable)
                             globals()['GEMINI_MODEL_NAME'] = model_name
                             test_success = True
                             logger.info(f"✓ Gemini API connected and working with model: {model_name}")
@@ -74,13 +70,6 @@ try:
                         continue
                 
                 if not test_success:
-                    # Try to list available models for debugging
-                    try:
-                        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                        logger.warning(f"Available models: {available_models}")
-                    except:
-                        pass
-                    
                     GEMINI_AVAILABLE = False
                     GEMINI_STATUS = "connection_failed"
                     GEMINI_ERROR = f"None of the tested models worked. Tried: {', '.join(model_names)}"
@@ -101,275 +90,73 @@ except Exception as e:
     logger.error(f"Failed to initialize Gemini: {e}")
 
 
-class ChatMessage(BaseModel):
-    role: str  # "user" or "assistant"
-    content: str
-
-
-def diagnose_gemini_health() -> Dict[str, Any]:
-    """
-    Diagnostic function to test if Gemini API is working correctly and can generate responses.
-    Called when Gemini fails to produce a response.
-    Returns a dictionary with diagnostic information.
-    """
-    diagnostic = {
-        "api_key_present": False,
-        "api_key_valid": False,
-        "model_available": False,
-        "can_generate": False,
-        "test_response": None,
-        "error": None,
-        "model_name": GEMINI_MODEL_NAME,
-        "status": GEMINI_STATUS
-    }
-    
-    try:
-        # Check if API key is present
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("OPENAI_API_KEY")
-        diagnostic["api_key_present"] = bool(api_key and api_key.strip() and api_key != "YOUR_GOOGLE_API_KEY_HERE")
-        
-        if not diagnostic["api_key_present"]:
-            diagnostic["error"] = "API key not found or is placeholder"
-            logger.error("🔍 Gemini Diagnostic: API key not found or is placeholder")
-            return diagnostic
-        
-        # Test API key validity by trying to configure
-        try:
-            genai.configure(api_key=api_key)
-            diagnostic["api_key_valid"] = True
-        except Exception as config_error:
-            diagnostic["error"] = f"API key configuration failed: {str(config_error)}"
-            logger.error(f"🔍 Gemini Diagnostic: API key configuration failed: {config_error}")
-            return diagnostic
-        
-        # Test if the model can generate content
-        try:
-            test_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
-            test_prompt = "Say hello"
-            
-            # Configure safety settings to be permissive for diagnostic
-            try:
-                from google.generativeai.types import HarmCategory, HarmBlockThreshold
-                safety_settings = [
-                    {
-                        "category": HarmCategory.HARM_CATEGORY_HARASSMENT,
-                        "threshold": HarmBlockThreshold.BLOCK_ONLY_HIGH
-                    },
-                    {
-                        "category": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                        "threshold": HarmBlockThreshold.BLOCK_ONLY_HIGH
-                    },
-                    {
-                        "category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                        "threshold": HarmBlockThreshold.BLOCK_ONLY_HIGH
-                    },
-                    {
-                        "category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                        "threshold": HarmBlockThreshold.BLOCK_ONLY_HIGH
-                    }
-                ]
-            except ImportError:
-                safety_settings = [
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}
-                ]
-            
-            test_response = test_model.generate_content(
-                test_prompt,
-                generation_config={
-                    "temperature": 0.1,
-                    "max_output_tokens": 50,  # Increased from 10
-                },
-                safety_settings=safety_settings
-            )
-            
-            if test_response and test_response.candidates:
-                candidate = test_response.candidates[0]
-                finish_reason = getattr(candidate, 'finish_reason', None)
-                
-                # Check safety ratings
-                safety_ratings = getattr(candidate, 'safety_ratings', [])
-                if safety_ratings:
-                    blocked_categories = []
-                    for rating in safety_ratings:
-                        if hasattr(rating, 'category'):
-                            cat = str(rating.category)
-                            prob = str(getattr(rating, 'probability', ''))
-                            if 'HIGH' in prob or 'MEDIUM' in prob:
-                                blocked_categories.append(f"{cat}({prob})")
-                    if blocked_categories:
-                        diagnostic["error"] = f"Model blocked by safety filters: {', '.join(blocked_categories)}"
-                        diagnostic["model_available"] = True
-                        diagnostic["safety_blocked"] = True
-                        logger.error(f"🔍 Gemini Diagnostic: Model blocked by safety filters: {blocked_categories}")
-                        return diagnostic
-                
-                # Try to extract text
-                test_text = None
-                try:
-                    if hasattr(test_response, 'text') and test_response.text:
-                        test_text = test_response.text.strip()
-                except Exception as text_err:
-                    logger.debug(f"Quick text accessor failed: {text_err}")
-                
-                if not test_text and hasattr(candidate, 'content') and candidate.content:
-                    if hasattr(candidate.content, 'parts'):
-                        parts = []
-                        for part in candidate.content.parts:
-                            if hasattr(part, 'text') and part.text:
-                                parts.append(part.text)
-                        if parts:
-                            test_text = " ".join(parts).strip()
-                
-                if test_text:
-                    diagnostic["can_generate"] = True
-                    diagnostic["test_response"] = test_text
-                    diagnostic["model_available"] = True
-                    diagnostic["finish_reason"] = str(finish_reason)
-                    logger.info(f"🔍 Gemini Diagnostic: ✓ API is working. Model: {GEMINI_MODEL_NAME}, Test response: '{test_text}', Finish reason: {finish_reason}")
-                else:
-                    # finish_reason 2 could be MAX_TOKENS or SAFETY
-                    if finish_reason == 2:
-                        if safety_ratings:
-                            diagnostic["error"] = f"Model blocked (finish_reason: 2, likely SAFETY block)"
-                        else:
-                            diagnostic["error"] = f"Model hit token limit (finish_reason: 2, MAX_TOKENS) - this shouldn't happen with max_output_tokens=50"
-                    else:
-                        diagnostic["error"] = f"Model returned empty response (finish_reason: {finish_reason})"
-                    diagnostic["model_available"] = True
-                    diagnostic["finish_reason"] = str(finish_reason)
-                    logger.warning(f"🔍 Gemini Diagnostic: Model available but returned empty response (finish_reason: {finish_reason})")
-            else:
-                diagnostic["error"] = "Model returned no candidates"
-                logger.error("🔍 Gemini Diagnostic: Model returned no candidates")
-        except Exception as model_error:
-            diagnostic["error"] = f"Model generation failed: {str(model_error)}"
-            logger.error(f"🔍 Gemini Diagnostic: Model generation failed: {model_error}", exc_info=True)
-            
-            # Try to list available models
-            try:
-                available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                diagnostic["available_models"] = available_models[:5]  # Limit to first 5
-                logger.info(f"🔍 Gemini Diagnostic: Available models: {available_models[:5]}")
-            except Exception as list_error:
-                logger.debug(f"Could not list models: {list_error}")
-    
-    except Exception as e:
-        diagnostic["error"] = f"Diagnostic failed: {str(e)}"
-        logger.error(f"🔍 Gemini Diagnostic: Diagnostic function failed: {e}", exc_info=True)
-    
-    return diagnostic
-
-
-class ChatRequest(BaseModel):
-    user_id: str
-    session_id: str
-    language: str
-    target_accent: str
-    user_message: str
-    conversation_history: Optional[List[ChatMessage]] = None
-
-
-class ChatResponse(BaseModel):
-    ai_message: str
-    audio_url: Optional[str] = None
-
-
 def generate_conversational_response(
     user_message: str,
     conversation_history: List[Dict[str, str]],
-    target_accent: str
+    target_accent: str,
+    target_language: str = "English",
+    accent_feedback_hint: Optional[str] = None
 ) -> str:
     """
-    Generate a friendly, conversational AI response
+    Generate a friendly, conversational AI response using Gemini
     """
-    # Handle initial greeting - MUST use Gemini, no fallback
-    if not user_message or user_message.strip() == "":
-        if not GEMINI_AVAILABLE:
-            raise HTTPException(
-                status_code=503,
-                detail=f"Gemini API is not available (status: {GEMINI_STATUS}). Cannot generate greeting. Please check API configuration."
-            )
-        
-        try:
-            greeting_prompt = f"""You are Wally, a casual friend who loves chatting. You're helping someone practice their {target_accent} accent, but you want to have a normal conversation first. Generate a brief, natural greeting (1-2 sentences) - be friendly and relaxed, like you're catching up with a friend. Ask them what they're up to or what they're interested in. Don't mention accents or coaching - just be a friendly person starting a conversation."""
-            model = genai.GenerativeModel(GEMINI_MODEL_NAME)
-            response = model.generate_content(greeting_prompt)
-            if response and response.text:
-                return remove_asterisks(response.text.strip())
-            else:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Gemini returned empty response when generating greeting"
-                )
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Failed to generate greeting with Gemini: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to generate greeting with Gemini: {str(e)}"
-            )
-    
-    # Truncate very long user messages to prevent token limit issues
-    max_user_message_length = 200
-    if len(user_message) > max_user_message_length:
-        logger.warning(f"User message too long ({len(user_message)} chars), truncating to {max_user_message_length}")
-        user_message = user_message[:max_user_message_length] + "..."
-    
-    # Create system prompt for friendly conversation - act like a casual friend
-    # Use simpler format similar to diagnostic (which works)
-    system_prompt = f"""You are Wally, a casual friend having a normal conversation. You're chatting with someone who's practicing their {target_accent} accent, but your main goal is to have a natural, friendly conversation - like you're hanging out with a friend.
-
-They said: "{user_message}"
-
-Respond naturally in 1-2 sentences. Have a normal conversation - acknowledge what they said, share your thoughts, ask follow-up questions. Be genuinely interested in what they're saying. Chat like a friend would."""
-    
-    # CRITICAL: Must use Gemini - no fallback allowed
     if not GEMINI_AVAILABLE:
-        logger.error("GEMINI_AVAILABLE is False - cannot generate real tutor responses!")
-        logger.error(f"Gemini status: {GEMINI_STATUS}, error: {GEMINI_ERROR}")
+        logger.error("GEMINI_AVAILABLE is False - cannot generate responses!")
         raise HTTPException(
             status_code=503,
-            detail=f"Gemini API is not available (status: {GEMINI_STATUS}, error: {GEMINI_ERROR}). Cannot generate tutor response. Please check API configuration."
+            detail=f"Gemini API is not available (status: {GEMINI_STATUS}, error: {GEMINI_ERROR})."
         )
     
-    # Gemini is available - use it to generate real tutor responses
     try:
-        logger.info(f"Using Gemini model: {GEMINI_MODEL_NAME} to generate REAL tutor response")
-        logger.info(f"User message: '{user_message}'")
-        logger.debug(f"Function generate_conversational_response called with: user_message='{user_message[:50]}...', target_accent='{target_accent}', history_len={len(conversation_history)}")
+        logger.info(f"Using Gemini model: {GEMINI_MODEL_NAME} to generate conversational response")
+        logger.info(f"User message: '{user_message[:100] if user_message else '(greeting)'}...'")
         
-        # Use the working model name
         model = genai.GenerativeModel(GEMINI_MODEL_NAME)
         
-        # Build conversation history as text for the prompt (limit to last 2 messages to reduce token usage)
-        history_text = ""
+        # Build conversation history text
+        conversation_context = ""
         if conversation_history:
-            # Limit to last 2 messages to keep prompt shorter
-            recent_history = conversation_history[-2:]
-            for msg in recent_history:
+            conversation_context = "\n\nHere is our conversation so far:\n"
+            for msg in conversation_history[-10:]:  # Last 10 messages for context
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
-                # Truncate long messages to keep history concise (50 chars max)
-                if len(content) > 50:
-                    content = content[:50] + "..."
-                if role == "user":
-                    history_text += f"Student: {content}\n"
-                elif role == "assistant":
-                    history_text += f"Wally: {content}\n"
+                if content and content.strip():
+                    if role == "user":
+                        conversation_context += f"User: {content}\n"
+                    else:
+                        conversation_context += f"Wally: {content}\n"
         
-        # Build the full prompt with user's current message (keep it minimal)
-        current_user_message = user_message  # Don't add "Student:" prefix to save tokens
+        # Build the main prompt
+        if user_message and user_message.strip():
+            current_message_context = f"\n\nUser just said: \"{user_message}\""
+        else:
+            current_message_context = "\n\n(This is the start of our conversation - greet them naturally)"
         
-        # Build complete prompt - use simple format like diagnostic (which works)
-        # Don't include history to avoid issues - the system_prompt already has the user message
-        full_prompt = system_prompt
+        # Add accent feedback instruction if provided
+        accent_instruction = ""
+        if accent_feedback_hint:
+            accent_instruction = f"\n\nCRITICAL: You MUST include accent feedback in your response. After your conversational response, you MUST naturally add this accent tip: \"{accent_feedback_hint}\" Make it flow naturally as part of your response, not as a separate statement. This is REQUIRED - do not skip it. The feedback should be integrated seamlessly into your response."
         
-        # Use standard generate_content (more reliable than start_chat)
-        # Configure safety settings to be more permissive for educational content
+        # Build language-specific instructions
+        language_instruction = ""
+        if target_language in ["Mandarin Chinese", "Chinese"]:
+            language_instruction = "\n\nCRITICAL FOR CHINESE: You MUST respond in Chinese (中文). You understand Chinese perfectly. When the user speaks Chinese, respond in Chinese. Use Chinese characters, not pinyin. Be natural and conversational in Chinese."
+        elif target_language == "Japanese":
+            language_instruction = "\n\nCRITICAL FOR JAPANESE: You MUST respond in Japanese (日本語). You understand Japanese perfectly. When the user speaks Japanese, respond in Japanese. Use Japanese characters (hiragana, katakana, kanji). Be natural and conversational in Japanese."
+        
+        full_prompt = f"""You are Wally, a friendly conversational AI assistant. You are having a natural, ongoing conversation with someone in {target_language}. You understand {target_language} perfectly and can have full conversations in it.
+
+CRITICAL: You MUST ALWAYS respond ENTIRELY in {target_language}. Never use English unless {target_language} is English.
+
+IMPORTANT: You understand and can process text in {target_language} perfectly. When the user writes or speaks in {target_language}, you understand it completely. You can read Chinese characters (中文), Japanese characters (日本語), and all other language scripts. Do not ask them to translate or repeat - you understand everything they say in {target_language}. If they say something in {target_language}, respond naturally in {target_language} as if you understood perfectly.{language_instruction}
+
+You are having a REAL conversation - you understand context, remember what was said, and respond naturally. Be conversational and engaging like talking to a friend. Ask follow-up questions, show interest, keep the conversation flowing naturally.
+
+{conversation_context}{current_message_context}{accent_instruction}
+
+Now respond naturally in {target_language} as Wally. Continue the conversation - acknowledge what they said, respond appropriately, ask questions, share thoughts. Be a good conversational partner. Keep it natural and engaging (1-3 sentences typically)."""
+        
+        # Configure safety settings
         try:
             from google.generativeai.types import HarmCategory, HarmBlockThreshold
             safety_settings = [
@@ -391,408 +178,214 @@ Respond naturally in 1-2 sentences. Have a normal conversation - acknowledge wha
                 }
             ]
         except ImportError:
-            # Fallback to string format if enum import fails
-            logger.warning("Could not import HarmCategory enum, using string format for safety settings")
             safety_settings = [
-                {
-                    "category": "HARM_CATEGORY_HARASSMENT",
-                    "threshold": "BLOCK_ONLY_HIGH"
-                },
-                {
-                    "category": "HARM_CATEGORY_HATE_SPEECH",
-                    "threshold": "BLOCK_ONLY_HIGH"
-                },
-                {
-                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                    "threshold": "BLOCK_ONLY_HIGH"
-                },
-                {
-                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                    "threshold": "BLOCK_ONLY_HIGH"
-                }
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}
             ]
         
-        # Log the prompt length for debugging
-        prompt_length = len(full_prompt)
-        logger.debug(f"Full prompt length: {prompt_length} chars")
-        if prompt_length > 500:
-            logger.warning(f"Prompt is quite long ({prompt_length} chars), may cause issues")
+        # Generate response with retry logic
+        max_retries = 2
+        response = None
+        last_error = None
         
-        response = model.generate_content(
-            full_prompt,
-            generation_config={
-                "temperature": 0.7,  # Slightly lower for more reliable responses
-                "top_p": 0.9,
-                "top_k": 40,
-                "max_output_tokens": 8192,  # Increased to 8192 for longer responses
-            },
-            safety_settings=safety_settings
-        )
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"🔄 Attempting Gemini generation (attempt {attempt + 1}/{max_retries})...")
+                response = model.generate_content(
+                    full_prompt,
+                    generation_config={
+                        "temperature": 0.8,
+                        "top_p": 0.95,
+                        "top_k": 40,
+                        "max_output_tokens": 500,
+                    },
+                    safety_settings=safety_settings
+                )
+                logger.info(f"✅ Gemini generation successful on attempt {attempt + 1}")
+                break  # Success, exit retry loop
+            except Exception as gen_error:
+                last_error = gen_error
+                logger.warning(f"⚠️ Gemini generation attempt {attempt + 1} failed: {gen_error}")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(0.5)  # Brief delay before retry
+                else:
+                    logger.error(f"❌ All {max_retries} attempts failed. Last error: {gen_error}")
         
-        # Check response structure and handle finish_reason
-        if not response or not hasattr(response, 'candidates') or not response.candidates:
-            logger.error("Gemini returned no candidates in response")
+        if not response:
             raise HTTPException(
                 status_code=500,
-                detail="Gemini returned invalid response structure. Please try again."
+                detail=f"Failed to generate response after {max_retries} attempts: {str(last_error) if last_error else 'Unknown error'}"
             )
         
-        candidate = response.candidates[0]
-        finish_reason = getattr(candidate, 'finish_reason', None)
+        # Extract response text with detailed diagnostics
+        ai_response_text = None
         
-        # Handle different finish reasons
-        # 0 = FINISH_REASON_UNSPECIFIED
-        # 1 = STOP (normal completion)
-        # 2 = MAX_TOKENS (hit token limit) or SAFETY (blocked)
-        # 3 = RECITATION (blocked due to recitation)
-        # 4 = OTHER
-        
-        if finish_reason == 2:
-            # Finish reason 2 can be MAX_TOKENS or SAFETY
-            # First, try to extract any text that was generated
-            extracted_text = None
-            if hasattr(candidate, 'content') and candidate.content:
-                try:
+        # Check for finish_reason (safety blocks, etc.)
+        finish_reason = None
+        if hasattr(response, 'candidates') and response.candidates:
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'finish_reason'):
+                finish_reason = candidate.finish_reason
+                logger.info(f"Gemini finish_reason: {finish_reason}")
+            
+            # Check if blocked by safety filters
+            if finish_reason in [2, 3]:  # 2 = SAFETY, 3 = RECITATION
+                logger.warning(f"⚠️ Gemini response blocked by safety filter (reason: {finish_reason})")
+                # Try to get partial text if available
+                if hasattr(candidate, 'content') and candidate.content:
                     if hasattr(candidate.content, 'parts'):
                         parts_text = []
                         for part in candidate.content.parts:
                             if hasattr(part, 'text') and part.text:
                                 parts_text.append(part.text)
                         if parts_text:
-                            extracted_text = " ".join(parts_text).strip()
-                except Exception as e:
-                    logger.debug(f"Could not extract text from candidate: {e}")
+                            ai_response_text = " ".join(parts_text).strip()
+                            logger.info(f"✅ Extracted partial text despite safety block: '{ai_response_text[:50]}...'")
+        
+        # Try standard text extraction
+        if not ai_response_text:
+            try:
+                if hasattr(response, 'text') and response.text:
+                    ai_response_text = response.text.strip()
+            except Exception as text_err:
+                logger.debug(f"Quick text accessor failed: {text_err}")
+        
+        # Try extracting from candidates
+        if not ai_response_text:
+            if hasattr(response, 'candidates') and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, 'content') and candidate.content:
+                    if hasattr(candidate.content, 'parts'):
+                        parts_text = []
+                        for part in candidate.content.parts:
+                            if hasattr(part, 'text') and part.text:
+                                parts_text.append(part.text)
+                        if parts_text:
+                            ai_response_text = " ".join(parts_text).strip()
+        
+        # Try alternative extraction methods
+        if not ai_response_text:
+            if hasattr(response, 'candidates') and response.candidates:
+                candidate = response.candidates[0]
+                # Try direct text attribute
+                if hasattr(candidate, 'text') and candidate.text:
+                    ai_response_text = candidate.text.strip()
+        
+        # If still no text, log detailed diagnostics and provide fallback
+        if not ai_response_text or len(ai_response_text.strip()) < 1:
+            logger.error(f"❌ Gemini returned empty response. finish_reason: {finish_reason}")
+            logger.error(f"   Response object: {type(response)}")
+            logger.error(f"   Has candidates: {hasattr(response, 'candidates')}")
+            if hasattr(response, 'candidates') and response.candidates:
+                logger.error(f"   Candidate count: {len(response.candidates)}")
+                candidate = response.candidates[0]
+                logger.error(f"   Candidate type: {type(candidate)}")
+                logger.error(f"   Candidate attributes: {dir(candidate)}")
             
-            # Check safety ratings to determine if it was blocked by safety filters
-            safety_ratings = getattr(candidate, 'safety_ratings', [])
-            has_safety_block = False
-            if safety_ratings:
-                # Check if any rating indicates blocking
-                for rating in safety_ratings:
-                    if hasattr(rating, 'probability'):
-                        prob = str(rating.probability) if hasattr(rating, 'probability') else None
-                        # If probability is HIGH or MEDIUM, it was likely blocked
-                        if prob and ('HIGH' in prob or 'MEDIUM' in prob):
-                            has_safety_block = True
-                            break
-            
-            if has_safety_block:
-                # It was blocked by safety filters
-                blocked_categories = []
-                for rating in safety_ratings:
-                    if hasattr(rating, 'category'):
-                        blocked_categories.append(str(rating.category))
-                logger.error(f"Gemini response was blocked by safety filters. Categories: {blocked_categories}")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Gemini blocked the response due to safety filters. Please try rephrasing your message or discussing a different topic."
-                )
-            elif extracted_text and len(extracted_text) > 10:
-                # We have partial text - it was likely MAX_TOKENS, but we can use what we got
-                extracted_text_cleaned = remove_asterisks(extracted_text)
-                logger.warning(f"Gemini response hit token limit but using partial response (length: {len(extracted_text_cleaned)})")
-                logger.info(f"Gemini response: '{extracted_text_cleaned}'")
-                return extracted_text_cleaned
+            # Provide fallback response in target language
+            if target_language == "Mandarin Chinese" or target_language == "Chinese":
+                ai_response_text = "好的，我明白了。让我们继续聊天吧！"
+            elif target_language == "Japanese":
+                ai_response_text = "わかりました。会話を続けましょう！"
+            elif target_language == "Spanish":
+                ai_response_text = "Entendido, continuemos la conversación."
+            elif target_language == "French":
+                ai_response_text = "D'accord, continuons la conversation."
+            elif target_language == "German":
+                ai_response_text = "Verstanden, lass uns das Gespräch fortsetzen."
+            elif target_language == "Italian":
+                ai_response_text = "Capito, continuiamo la conversazione."
+            elif target_language == "Portuguese":
+                ai_response_text = "Entendido, vamos continuar a conversa."
             else:
-                # No text extracted and no safety block - likely MAX_TOKENS with no output
-                # This shouldn't happen often, but if it does, try a simpler retry
-                logger.warning("Gemini response hit MAX_TOKENS limit with no output - attempting retry with minimal prompt")
-                try:
-                    # Retry with a much simpler, shorter prompt (no history, no extra context)
-                    # Use the original user_message (already truncated to 200 chars) but limit to 100 for retry
-                    retry_user_msg = user_message[:100] if len(user_message) > 100 else user_message
-                    # Use the same simple format as diagnostic (which works)
-                    simple_prompt = f"""You are Wally, a casual friend having a normal conversation. You're chatting with someone practicing their {target_accent} accent, but focus on having a natural conversation.
-
-They said: "{retry_user_msg}"
-
-Respond naturally in 1-2 sentences. Have a normal conversation - acknowledge what they said and ask a follow-up question. Be friendly and conversational, like you're talking to a friend."""
-                    
-                    logger.info(f"Attempting retry with minimal prompt (no history, user message: {len(retry_user_msg)} chars)")
-                    logger.debug(f"Retry prompt: {simple_prompt}")
-                    
-                    retry_response = model.generate_content(
-                        simple_prompt,
-                        generation_config={
-                            "temperature": 0.7,
-                            "max_output_tokens": 8192,  # Increased to 8192
-                        },
-                        safety_settings=safety_settings
-                    )
-                    
-                    if retry_response and retry_response.candidates:
-                        retry_candidate = retry_response.candidates[0]
-                        retry_finish_reason = getattr(retry_candidate, 'finish_reason', None)
-                        
-                        # Check safety ratings for retry
-                        retry_safety_ratings = getattr(retry_candidate, 'safety_ratings', [])
-                        if retry_safety_ratings:
-                            blocked = []
-                            for rating in retry_safety_ratings:
-                                if hasattr(rating, 'category'):
-                                    prob = str(getattr(rating, 'probability', ''))
-                                    if 'HIGH' in prob or 'MEDIUM' in prob:
-                                        blocked.append(f"{str(rating.category)}({prob})")
-                            if blocked:
-                                logger.error(f"Retry blocked by safety filters: {blocked}")
-                        
-                        # Extract text from retry response
-                        retry_text = None
-                        try:
-                            if hasattr(retry_response, 'text') and retry_response.text:
-                                retry_text = retry_response.text.strip()
-                        except Exception as text_err:
-                            logger.debug(f"Retry quick text accessor failed: {text_err}")
-                        
-                        if not retry_text and hasattr(retry_candidate, 'content') and retry_candidate.content:
-                            if hasattr(retry_candidate.content, 'parts'):
-                                retry_parts = []
-                                for part in retry_candidate.content.parts:
-                                    if hasattr(part, 'text') and part.text:
-                                        retry_parts.append(part.text)
-                                if retry_parts:
-                                    retry_text = " ".join(retry_parts).strip()
-                        
-                        if retry_text and len(retry_text) > 5:
-                            retry_text_cleaned = remove_asterisks(retry_text)
-                            logger.info(f"✓ Retry successful, using shorter response: '{retry_text_cleaned}' (finish_reason: {retry_finish_reason})")
-                            return retry_text_cleaned
-                        else:
-                            logger.warning(f"Retry returned empty or invalid response (finish_reason: {retry_finish_reason}, text length: {len(retry_text) if retry_text else 0})")
-                            if retry_finish_reason == 2:
-                                logger.warning(f"Retry finish_reason 2 - could be MAX_TOKENS or SAFETY block. Safety ratings: {retry_safety_ratings}")
-                    
-                    # If retry also failed, run diagnostic and raise error - no fallback responses allowed
-                    logger.error("Retry attempt failed - Gemini cannot generate response. Running diagnostic...")
-                    diagnostic = diagnose_gemini_health()
-                    logger.error(f"🔍 Gemini Diagnostic Results: {json.dumps(diagnostic, indent=2)}")
-                    
-                    error_detail = "Gemini failed to generate a response even with simplified prompt."
-                    if diagnostic.get("error"):
-                        error_detail += f" Diagnostic: {diagnostic['error']}"
-                    if not diagnostic.get("can_generate"):
-                        error_detail += " Gemini API diagnostic indicates the API cannot generate responses."
-                    
-                    raise HTTPException(
-                        status_code=500,
-                        detail=error_detail
-                    )
-                    
-                except HTTPException:
-                    raise
-                except Exception as retry_error:
-                    logger.error(f"Retry attempt failed: {retry_error}", exc_info=True)
-                    # Run diagnostic on exception
-                    diagnostic = diagnose_gemini_health()
-                    logger.error(f"🔍 Gemini Diagnostic Results (after exception): {json.dumps(diagnostic, indent=2)}")
-                    
-                    error_detail = f"Gemini failed to generate a response. Error: {str(retry_error)}"
-                    if diagnostic.get("error"):
-                        error_detail += f" Diagnostic: {diagnostic['error']}"
-                    
-                    raise HTTPException(
-                        status_code=500,
-                        detail=error_detail
-                    )
+                ai_response_text = "I understand. Let's continue our conversation."
+            
+            logger.warning(f"⚠️ Using fallback response: '{ai_response_text}'")
         
-        elif finish_reason == 3:  # RECITATION
-            logger.error("Gemini response was blocked due to recitation concerns")
-            # Run diagnostic to verify API is still working
-            diagnostic = diagnose_gemini_health()
-            logger.error(f"🔍 Gemini Diagnostic Results (recitation block): {json.dumps(diagnostic, indent=2)}")
-            raise HTTPException(
-                status_code=500,
-                detail="Gemini response was blocked due to recitation concerns. Please rephrase your message."
-            )
+        ai_response_text = remove_asterisks(ai_response_text)
+        logger.info(f"✅ Generated response: '{ai_response_text[:100]}...'")
+        return ai_response_text
         
-        elif finish_reason and finish_reason != 1 and finish_reason != 0:  # Not STOP or UNSPECIFIED
-            logger.warning(f"Gemini response finished with unexpected reason: {finish_reason}")
-            # Still try to extract text if available
-        
-        # Try to extract text from response
-        try:
-            # First try the quick accessor
-            if hasattr(response, 'text') and response.text:
-                gemini_response = remove_asterisks(response.text.strip())
-                logger.info(f"✓ Gemini generated REAL tutor response (length: {len(gemini_response)})")
-                logger.info(f"Gemini response: '{gemini_response}'")
-                return gemini_response
-        except Exception as text_error:
-            logger.debug(f"Quick text accessor failed: {text_error}, trying manual extraction")
-        
-        # Manual extraction from candidate.content.parts
-        if hasattr(candidate, 'content') and candidate.content:
-            if hasattr(candidate.content, 'parts'):
-                parts_text = []
-                for part in candidate.content.parts:
-                    if hasattr(part, 'text') and part.text:
-                        parts_text.append(part.text)
-                if parts_text:
-                    gemini_response = remove_asterisks(" ".join(parts_text).strip())
-                    logger.info(f"✓ Gemini generated REAL tutor response (length: {len(gemini_response)})")
-                    logger.info(f"Gemini response: '{gemini_response}'")
-                    return gemini_response
-        
-        # If we get here, response is empty or invalid
-        logger.error("Gemini returned empty or invalid response!")
-        logger.error(f"Finish reason: {finish_reason}")
-        logger.error(f"Candidate structure: {dir(candidate)}")
-        
-        # Run diagnostic to check if API is working
-        diagnostic = diagnose_gemini_health()
-        logger.error(f"🔍 Gemini Diagnostic Results (empty response): {json.dumps(diagnostic, indent=2)}")
-        
-        error_detail = f"Gemini returned empty response (finish_reason: {finish_reason}). Cannot generate tutor response."
-        if diagnostic.get("error"):
-            error_detail += f" Diagnostic: {diagnostic['error']}"
-        if not diagnostic.get("can_generate"):
-            error_detail += " Gemini API diagnostic indicates the API cannot generate responses."
-        
-        raise HTTPException(
-            status_code=500,
-            detail=error_detail
-        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"CRITICAL: Gemini generation failed: {e}", exc_info=True)
-        
-        # Run diagnostic to check if API is working
-        diagnostic = diagnose_gemini_health()
-        logger.error(f"🔍 Gemini Diagnostic Results (exception): {json.dumps(diagnostic, indent=2)}")
-        
-        error_detail = f"Failed to generate tutor response with Gemini: {str(e)}"
-        if diagnostic.get("error"):
-            error_detail += f" Diagnostic: {diagnostic['error']}"
-        if not diagnostic.get("can_generate"):
-            error_detail += " Gemini API diagnostic indicates the API cannot generate responses."
-        
         raise HTTPException(
             status_code=500,
-            detail=error_detail
+            detail=f"Failed to generate response: {str(e)}"
         )
-    
-    # Final fallback - this should never be reached, but ensures function always returns or raises
-    logger.error("CRITICAL: generate_conversational_response reached end without returning or raising")
-    raise HTTPException(
-        status_code=500,
-        detail="Internal error: Failed to generate response. Please try again."
-    )
 
 
-
-
-@router.post("/message", response_model=ChatResponse)
-async def chat_message(request: ChatRequest):
+def generate_simple_accent_feedback(
+    user_text: str,
+    target_language: str,
+    target_accent: str
+) -> str:
     """
-    Generate AI conversational response for live chat
-    
-    Args:
-        request: Chat request with user message and context
-    
-    Returns:
-        AI response with text and optional audio
+    Generate simple, brief accent feedback using Gemini
+    No Whisper, no complex analysis - just a quick tip
     """
+    if not GEMINI_AVAILABLE:
+        return None
+    
     try:
-        logger.info(f"Generating chat response for session {request.session_id}")
+        model = genai.GenerativeModel(GEMINI_MODEL_NAME)
         
-        # Convert conversation history to dict format
-        history = []
-        if request.conversation_history:
-            for msg in request.conversation_history:
-                history.append({
-                    "role": msg.role,
-                    "content": msg.content
-                })
+        # Simple prompt for accent feedback
+        feedback_prompt = f"""The user just said: "{user_text}"
+
+They are practicing {target_language} with a {target_accent} accent.
+
+Give ONE brief, specific tip to help them sound more like {target_accent}. Be very specific - mention a specific sound, word, or pronunciation pattern. Keep it to 1 sentence.
+
+Example format: "Also, if you want to sound more like {target_accent}, try putting more emphasis on the 'er' sound in words like 'na er'."
+
+Respond in {target_language}."""
         
-        # Generate conversational response
-        ai_message = generate_conversational_response(
-            user_message=request.user_message,
-            conversation_history=history,
-            target_accent=request.target_accent
+        response = model.generate_content(
+            feedback_prompt,
+            generation_config={
+                "temperature": 0.7,
+                "max_output_tokens": 100,  # Keep it brief
+            }
         )
         
-        # Generate TTS audio
+        feedback_text = None
         try:
-            accent_name = request.target_accent.lower().replace(' english', '').replace('english', '').strip()
-            audio_bytes = await text_to_speech(
-                text=ai_message,
-                accent=accent_name
-            )
-            
-            # In production, you might want to save this to a CDN and return URL
-            # For now, we'll return the audio in the response
-            # Note: This is a simplified approach - in production, use a proper file storage solution
-            
-        except Exception as e:
-            logger.warning(f"TTS generation failed: {e}")
-            audio_bytes = None
+            if hasattr(response, 'text') and response.text:
+                feedback_text = response.text.strip()
+        except:
+            pass
         
-        return ChatResponse(
-            ai_message=ai_message,
-            audio_url=None  # In production, return CDN URL
-        )
+        if not feedback_text:
+            if hasattr(response, 'candidates') and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, 'content') and candidate.content:
+                    if hasattr(candidate.content, 'parts'):
+                        parts = []
+                        for part in candidate.content.parts:
+                            if hasattr(part, 'text') and part.text:
+                                parts.append(part.text)
+                        if parts:
+                            feedback_text = " ".join(parts).strip()
         
+        if feedback_text:
+            feedback_text = remove_asterisks(feedback_text)
+            logger.info(f"✅ Generated accent feedback: '{feedback_text}'")
+            return feedback_text
+        else:
+            return None
+            
     except Exception as e:
-        logger.error(f"Chat message generation failed: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to generate chat response: {str(e)}"
-        )
+        logger.warning(f"Failed to generate accent feedback: {e}")
+        return None
 
 
-@router.post("/message/audio")
-async def chat_message_with_audio(request: ChatRequest):
-    """
-    Generate AI conversational response with audio
-    
-    Returns JSON with message and audio as base64
-    """
-    try:
-        # Generate response
-        chat_response = await chat_message(request)
-        
-        # Generate TTS audio - always try to generate, even if it fails
-        audio_base64 = None
-        accent_name = request.target_accent.lower().replace(' english', '').replace('english', '').strip()
-        
-        try:
-            # Use robotic voice for Wally
-            audio_bytes = await text_to_speech(
-                text=chat_response.ai_message,
-                accent=accent_name,
-                robotic=True  # Wally has a robotic voice
-            )
-            
-            if audio_bytes and len(audio_bytes) > 0:
-                # Convert audio to base64 for JSON response
-                import base64
-                audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
-                logger.info(f"Generated TTS audio: {len(audio_bytes)} bytes, base64 length: {len(audio_base64)}")
-            else:
-                logger.warning("TTS returned empty audio bytes")
-        except Exception as tts_error:
-            logger.error(f"TTS generation failed: {tts_error}")
-            # Don't fail the entire request - frontend will generate TTS as fallback
-            audio_base64 = None
-        
-        return {
-            "ai_message": chat_response.ai_message,
-            "audio_base64": audio_base64,  # May be None if TTS failed
-        }
-        
-    except Exception as e:
-        logger.error("=" * 80)
-        logger.error(f"❌ CHAT REQUEST FAILED (Exception)")
-        logger.error(f"   Error: {str(e)}")
-        logger.error(f"   Error type: {type(e).__name__}")
-        logger.error("=" * 80)
-        logger.error(f"Full exception traceback:", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to generate chat response: {str(e)}"
-        )
-
+# Track active greeting requests to prevent duplicates
+_active_greeting_requests = {}  # session_id -> timestamp
 
 @router.post("/message/audio/upload")
 async def chat_message_with_audio_upload(
@@ -804,301 +397,317 @@ async def chat_message_with_audio_upload(
     audio_file: UploadFile = File(...)
 ):
     """
-    Process audio directly: Whisper transcription -> Gemini conversational response -> TTS
+    Main chat endpoint: Process audio, generate conversational response + accent feedback
     
-    This is the main endpoint for live chat that:
-    1. Transcribes audio with Whisper
-    2. Uses Gemini to generate conversational response
-    3. Generates TTS audio for the response
+    Pipeline:
+    1. If empty audio (first chat) -> Generate greeting in target language
+    2. If user audio -> Transcribe, generate conversational response, add accent feedback
     """
-    import time
     start_time = time.time()
-    step_times = {}
     
     try:
         logger.info("=" * 80)
-        logger.info(f"🔵 CHAT REQUEST STARTED - Session: {session_id}, User: {user_id}")
+        logger.info(f"🔵 CHAT REQUEST - Session: {session_id}, User: {user_id}")
         logger.info(f"   Target accent: {target_accent}, Language: {language}")
-        logger.info(f"   Conversation history length: {len(conversation_history) if conversation_history else 0} chars")
         
-        # Step 1: Read audio file and save to temporary file for accent detection
-        step_start = time.time()
+        # Step 1: Read audio file
         audio_bytes = await audio_file.read()
-        step_times['read_audio'] = time.time() - step_start
-        logger.info(f"✅ STEP 1: Read audio file - {len(audio_bytes)} bytes ({step_times['read_audio']:.2f}s)")
+        logger.info(f"✅ Read audio: {len(audio_bytes)} bytes")
         
-        # Save audio to temporary file for accent classification
-        import tempfile
-        import os
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-            tmp_file.write(audio_bytes)
-            tmp_file_path = tmp_file.name
+        # Get target language name
+        target_language_name = language
+        if isinstance(language, dict):
+            target_language_name = language.get('name', 'English')
+        elif isinstance(language, str):
+            language_map = {
+                'english': 'English',
+                'spanish': 'Spanish',
+                'french': 'French',
+                'german': 'German',
+                'italian': 'Italian',
+                'portuguese': 'Portuguese',
+                'mandarin': 'Mandarin Chinese',
+                'chinese': 'Mandarin Chinese',
+                'japanese': 'Japanese'
+            }
+            target_language_name = language_map.get(language.lower(), language)
         
-        try:
-            # Step 2: Transcribe with Whisper (speech-to-text)
-            step_start = time.time()
-            logger.info("🔄 STEP 2: Starting Whisper transcription...")
-            transcription_result = await transcribe_audio(audio_bytes, language=language)
-            step_times['whisper_transcription'] = time.time() - step_start
-            logger.info(f"✅ STEP 2: Whisper transcription completed ({step_times['whisper_transcription']:.2f}s)")
+        # Handle empty audio (first chat) - generate greeting
+        if len(audio_bytes) == 0:
+            # CRITICAL: Check for duplicate greeting requests BEFORE doing any work
+            current_time = time.time()
+            if session_id in _active_greeting_requests:
+                last_request_time = _active_greeting_requests[session_id]
+                if current_time - last_request_time < 5.0:  # Within 5 seconds (increased from 2)
+                    logger.warning(f"⚠️ Duplicate greeting request detected for session {session_id} - ignoring (last request {current_time - last_request_time:.2f}s ago)")
+                    raise HTTPException(
+                        status_code=429,
+                        detail="Greeting request already in progress. Please wait."
+                    )
             
-            # Check if transcription_result is None or not a dict
-            if transcription_result is None:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Whisper transcription returned None. Please try again."
+            # Mark this session as having an active greeting request IMMEDIATELY
+            _active_greeting_requests[session_id] = current_time
+            logger.info(f"🔵 Starting greeting generation for session {session_id}")
+            
+            try:
+                greeting = generate_conversational_response(
+                    user_message="",  # Empty triggers greeting
+                    conversation_history=[],
+                    target_accent=target_accent,
+                    target_language=target_language_name
                 )
-            
-            if not isinstance(transcription_result, dict):
-                logger.error(f"Transcription result is not a dict: {type(transcription_result)}")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Whisper transcription returned invalid format. Please try again."
-                )
-            
-            transcribed_text = transcription_result.get("transcribed_text", "")
-            detected_language = transcription_result.get("language", language)
-            
-            # Check if transcription is empty or unclear
-            if not transcribed_text or len(transcribed_text.strip()) < 1:
-                # Return a friendly response asking user to be more clear
-                unclear_response = remove_asterisks("Sorry, I didn't catch that. Could you say that again?")
-                logger.warning("Transcription was empty - asking user to be more clear")
                 
-                # Generate TTS for the unclear response
+                # Generate TTS for greeting - ONLY ONCE
                 audio_base64 = None
                 accent_name = target_accent.lower().replace(' english', '').replace('english', '').strip()
+                logger.info(f"🎤 Generating TTS for greeting ({len(greeting)} chars)...")
                 try:
-                    audio_bytes = await text_to_speech(
-                        text=unclear_response,
+                    audio_bytes_tts = await text_to_speech(
+                        text=greeting,
                         accent=accent_name,
                         robotic=True
                     )
-                    if audio_bytes and len(audio_bytes) > 0:
-                        audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
+                    if audio_bytes_tts and len(audio_bytes_tts) > 0:
+                        audio_base64 = base64.b64encode(audio_bytes_tts).decode('utf-8')
+                        logger.info(f"✅ TTS generation successful for greeting ({len(audio_bytes_tts)} bytes)")
+                    else:
+                        logger.warning("⚠️ TTS returned empty audio for greeting")
                 except Exception as tts_error:
-                    logger.warning(f"TTS generation failed for unclear response: {tts_error}")
+                    logger.error(f"❌ TTS generation failed for greeting: {tts_error}", exc_info=True)
+                    # Don't raise - continue without audio
+                
+                # Clean up the active request tracking after SUCCESS
+                if session_id in _active_greeting_requests:
+                    del _active_greeting_requests[session_id]
+                    logger.info(f"✅ Greeting generation completed for session {session_id}")
                 
                 return {
                     "transcribed_text": "",
-                    "ai_message": unclear_response,
+                    "ai_message": greeting,
+                    "accent_feedback": None,  # No feedback for greeting
                     "audio_base64": audio_base64
                 }
-            
-            # Check if transcription is too short or unclear (less than 3 characters after cleaning)
-            cleaned_text = transcribed_text.strip()
-            if len(cleaned_text) < 3:
-                unclear_response = remove_asterisks("Hmm, I'm having trouble making that out. Could you try saying it again?")
-                logger.warning(f"Transcription too short ({len(cleaned_text)} chars): '{cleaned_text}' - asking user to be more clear")
-                
-                # Generate TTS for the unclear response
-                audio_base64 = None
-                accent_name = target_accent.lower().replace(' english', '').replace('english', '').strip()
-                try:
-                    audio_bytes = await text_to_speech(
-                        text=unclear_response,
-                        accent=accent_name,
-                        robotic=True
-                    )
-                    if audio_bytes and len(audio_bytes) > 0:
-                        audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
-                except Exception as tts_error:
-                    logger.warning(f"TTS generation failed for unclear response: {tts_error}")
-                
-                return {
-                    "transcribed_text": cleaned_text,
-                    "ai_message": unclear_response,
-                    "audio_base64": audio_base64
-                }
-            
-            # Check if transcription is mostly noise/unintelligible (mostly punctuation or special chars)
-            # Count alphabetic characters vs total characters
-            alpha_chars = len(re.sub(r'[^a-zA-Z]', '', cleaned_text))
-            total_chars = len(cleaned_text)
-            if total_chars > 0 and alpha_chars / total_chars < 0.3:  # Less than 30% alphabetic
-                unclear_response = remove_asterisks("Sorry, I couldn't quite make that out. Mind saying it again?")
-                logger.warning(f"Transcription appears to be mostly noise ({alpha_chars}/{total_chars} alphabetic): '{cleaned_text}' - asking user to be more clear")
-                
-                # Generate TTS for the unclear response
-                audio_base64 = None
-                accent_name = target_accent.lower().replace(' english', '').replace('english', '').strip()
-                try:
-                    audio_bytes = await text_to_speech(
-                        text=unclear_response,
-                        accent=accent_name,
-                        robotic=True
-                    )
-                    if audio_bytes and len(audio_bytes) > 0:
-                        audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
-                except Exception as tts_error:
-                    logger.warning(f"TTS generation failed for unclear response: {tts_error}")
-                
-                return {
-                    "transcribed_text": cleaned_text,
-                    "ai_message": unclear_response,
-                    "audio_base64": audio_base64
-                }
-            
-            logger.info(f"   Whisper transcribed text: '{transcribed_text}' (detected language: {detected_language})")
-            
-            # Accent detection removed - will be re-implemented with new model
-            detected_user_accent = None
-            accent_confidence = None
-            step_times['accent_detection'] = 0
+            except Exception as greeting_error:
+                # Clean up on error
+                if session_id in _active_greeting_requests:
+                    del _active_greeting_requests[session_id]
+                    logger.info(f"🧹 Cleaned up greeting request for session {session_id} after error")
+                raise  # Re-raise the exception
         
-        finally:
-            # Clean up temporary file immediately after accent detection
-            try:
-                if os.path.exists(tmp_file_path):
-                    os.unlink(tmp_file_path)
-                    logger.debug(f"Cleaned up temp file: {tmp_file_path}")
-            except Exception as e:
-                logger.warning(f"Failed to delete temp file: {e}")
+        # Step 2: Transcribe user audio
+        logger.info("🔄 Transcribing user audio...")
+        # Normalize language for Whisper API (convert to ISO code)
+        whisper_language = None
+        if isinstance(language, str):
+            language_lower = language.lower()
+            # Map to Whisper language codes
+            language_to_code = {
+                'english': 'en',
+                'spanish': 'es',
+                'french': 'fr',
+                'german': 'de',
+                'italian': 'it',
+                'portuguese': 'pt',
+                'mandarin': 'zh',
+                'chinese': 'zh',
+                'japanese': 'ja'
+            }
+            whisper_language = language_to_code.get(language_lower, language_lower if len(language_lower) == 2 else None)
+        elif isinstance(language, dict):
+            # If language is a dict, extract the ID
+            lang_id = language.get('id', 'english')
+            language_lower = lang_id.lower()
+            language_to_code = {
+                'english': 'en',
+                'spanish': 'es',
+                'french': 'fr',
+                'german': 'de',
+                'italian': 'it',
+                'portuguese': 'pt',
+                'mandarin': 'zh',
+                'chinese': 'zh',
+                'japanese': 'ja'
+            }
+            whisper_language = language_to_code.get(language_lower, language_lower if len(language_lower) == 2 else None)
+        
+        logger.info(f"🔄 Transcribing with language hint: {whisper_language} (original: {language})")
+        transcription_result = await transcribe_audio(audio_bytes, language=whisper_language)
+        
+        if not transcription_result or not isinstance(transcription_result, dict):
+            raise HTTPException(status_code=500, detail="Whisper transcription failed")
+        
+        transcribed_text = transcription_result.get("transcribed_text", "")
+        detected_language = transcription_result.get("language", whisper_language or "en")
+        
+        logger.info(f"✅ Transcription result: '{transcribed_text}' (detected: {detected_language})")
+        
+        if not transcribed_text or len(transcribed_text.strip()) < 1:
+            # Generate unclear response in target language
+            unclear_response = None
+            if GEMINI_AVAILABLE:
+                try:
+                    unclear_prompt = f"""Generate a brief, friendly message in {target_language_name} asking the user to repeat what they said because you didn't catch it. Keep it to 1 sentence. Respond ONLY in {target_language_name}."""
+                    model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+                    response = model.generate_content(unclear_prompt)
+                    if response and response.text:
+                        unclear_response = remove_asterisks(response.text.strip())
+                except:
+                    pass
+            
+            if not unclear_response:
+                if target_language_name == 'English':
+                    unclear_response = "Sorry, I didn't catch that. Could you say that again?"
+                elif target_language_name == 'Mandarin Chinese':
+                    unclear_response = "抱歉，我没听清楚。你能再说一遍吗？"
+                else:
+                    unclear_response = "Could you repeat that?"
+            
+            return {
+                "transcribed_text": "",
+                "ai_message": unclear_response,
+                "accent_feedback": None,
+                "audio_base64": None
+            }
+        
+        logger.info(f"✅ Transcribed: '{transcribed_text}'")
         
         # Step 3: Parse conversation history
         history = []
         if conversation_history:
             try:
-                import json
                 history_data = json.loads(conversation_history)
-                
-                # Check if history_data is None or not a list
-                if history_data is None:
-                    logger.warning("Conversation history parsed to None, using empty history")
-                    history_data = []
-                
-                if not isinstance(history_data, list):
-                    logger.warning(f"Conversation history is not a list: {type(history_data)}, using empty history")
-                    history_data = []
-                
-                for msg in history_data:
-                    if msg is None:
-                        continue
-                    if not isinstance(msg, dict):
-                        logger.warning(f"History message is not a dict: {type(msg)}, skipping")
-                        continue
-                    history.append({
-                        "role": msg.get("role", "user"),
-                        "content": msg.get("content", "")
-                    })
+                if isinstance(history_data, list):
+                    for msg in history_data:
+                        if isinstance(msg, dict):
+                            history.append({
+                                "role": msg.get("role", "user"),
+                                "content": msg.get("content", "")
+                            })
             except Exception as e:
                 logger.warning(f"Failed to parse conversation history: {e}")
         
-        # Step 3: Generate conversational response with Gemini
-        step_start = time.time()
-        logger.info("🔄 STEP 3: Starting conversational response generation with Gemini...")
-        logger.info(f"   User message (transcribed): '{transcribed_text}'")
-        logger.info(f"   Conversation history length: {len(history)} messages")
-        if history:
-            logger.debug(f"   Recent history: {history[-3:]}")
-        ai_message_raw = generate_conversational_response(
-            user_message=transcribed_text,
-            conversation_history=history,
+        # Step 4: Generate simple accent feedback first (for context)
+        logger.info("🔄 Generating accent feedback...")
+        accent_feedback = generate_simple_accent_feedback(
+            user_text=transcribed_text,
+            target_language=target_language_name,
             target_accent=target_accent
         )
-        step_times['conversational_response'] = time.time() - step_start
-        logger.info(f"✅ STEP 3: Conversational response generated ({step_times['conversational_response']:.2f}s)")
         
-        # Remove asterisks from AI message
-        ai_message = remove_asterisks(ai_message_raw) if ai_message_raw else None
+        # Ensure we always have accent feedback (fallback if generation fails)
+        if not accent_feedback:
+            logger.warning("⚠️ Accent feedback generation returned None, using fallback")
+            # Generate a simple fallback feedback in target language
+            if target_language_name in ["Mandarin Chinese", "Chinese"]:
+                accent_feedback = f"另外，如果你想听起来更像{target_accent}，可以多注意一下发音的细节。"
+            elif target_language_name == "Japanese":
+                accent_feedback = f"また、{target_accent}のように聞こえるように、発音の細部に注意してください。"
+            elif target_language_name == "Spanish":
+                accent_feedback = f"Además, si quieres sonar más como {target_accent}, presta atención a los detalles de pronunciación."
+            elif target_language_name == "French":
+                accent_feedback = f"De plus, si vous voulez sonner plus comme {target_accent}, faites attention aux détails de prononciation."
+            elif target_language_name == "German":
+                accent_feedback = f"Außerdem, wenn Sie mehr wie {target_accent} klingen möchten, achten Sie auf Aussprachedetails."
+            elif target_language_name == "Italian":
+                accent_feedback = f"Inoltre, se vuoi suonare più come {target_accent}, presta attenzione ai dettagli della pronuncia."
+            elif target_language_name == "Portuguese":
+                accent_feedback = f"Além disso, se você quiser soar mais como {target_accent}, preste atenção aos detalhes da pronúncia."
+            else:
+                accent_feedback = f"Also, if you want to sound more like {target_accent}, pay attention to pronunciation details."
         
-        # Check if ai_message is None or not a string
-        if ai_message is None:
-            logger.error("generate_conversational_response returned None")
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to generate AI response. Please try again."
-            )
+        logger.info(f"✅ Accent feedback ready: '{accent_feedback[:50]}...'")
         
-        if not isinstance(ai_message, str):
-            logger.error(f"AI message is not a string: {type(ai_message)}")
-            raise HTTPException(
-                status_code=500,
-                detail="AI response returned invalid format. Please try again."
-            )
+        # Step 5: Generate conversational response with accent feedback integrated
+        logger.info("🔄 Generating conversational response...")
+        ai_message = generate_conversational_response(
+            user_message=transcribed_text,
+            conversation_history=history,
+            target_accent=target_accent,
+            target_language=target_language_name,
+            accent_feedback_hint=accent_feedback  # Pass feedback hint so Wally can include it naturally
+        )
         
-        if len(ai_message.strip()) == 0:
-            logger.error("AI message is empty")
-            raise HTTPException(
-                status_code=500,
-                detail="AI response was empty. Please try again."
-            )
+        # Step 6: Ensure accent feedback is included in the response
+        # Simple check: if feedback exists and is not already at the end of the message, append it
+        # We check if the feedback text (or a significant portion) appears in the message
+        feedback_included = False
+        if accent_feedback:
+            # Check if a substantial portion of the feedback is already in the message
+            # Use a more reliable check: see if at least 60% of the feedback words appear in the message
+            feedback_words = set(word.lower() for word in accent_feedback.split() if len(word) > 2)
+            message_words = set(word.lower() for word in ai_message.split())
+            
+            if feedback_words:
+                overlap = len(feedback_words.intersection(message_words))
+                overlap_ratio = overlap / len(feedback_words)
+                feedback_included = overlap_ratio >= 0.6  # At least 60% of feedback words present
+                
+                # Also check if the feedback text itself appears (for exact matches)
+                if not feedback_included:
+                    feedback_included = accent_feedback.lower().strip() in ai_message.lower()
+            
+            if not feedback_included:
+                # Append feedback only once - check we haven't already appended it
+                if not ai_message.endswith(accent_feedback.strip()):
+                    logger.info("📝 Appending accent feedback to response (not naturally included)")
+                    ai_message = f"{ai_message} {accent_feedback}"
+                else:
+                    logger.info("✅ Accent feedback already appended to response")
+            else:
+                logger.info("✅ Accent feedback naturally included in response")
         
-        logger.info(f"   Generated AI response: '{ai_message[:100]}...' (length: {len(ai_message)})")
-        
-        # Step 4: Generate TTS audio for response
-        step_start = time.time()
+        # Step 7: Generate TTS for response (including accent feedback)
+        # IMPORTANT: Only call TTS once per request
         audio_base64 = None
         accent_name = target_accent.lower().replace(' english', '').replace('english', '').strip()
         
-        logger.info("🔄 STEP 4: Starting TTS audio generation...")
-        try:
-            audio_bytes = await text_to_speech(
-                text=ai_message,
-                accent=accent_name,
-                robotic=True  # Wally has a robotic voice
-            )
-            step_times['tts_generation'] = time.time() - step_start
-            
-            if audio_bytes and len(audio_bytes) > 0:
-                audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
-                logger.info(f"✅ STEP 4: TTS audio generation completed ({step_times['tts_generation']:.2f}s)")
-                logger.info(f"   Generated audio: {len(audio_bytes)} bytes, base64 length: {len(audio_base64)}")
-            else:
-                logger.warning(f"⚠️ STEP 4: TTS returned empty audio bytes ({step_times['tts_generation']:.2f}s)")
-                audio_base64 = None
-        except Exception as tts_error:
-            step_times['tts_generation'] = time.time() - step_start
-            logger.error(f"❌ STEP 4: TTS generation failed ({step_times['tts_generation']:.2f}s): {tts_error}", exc_info=True)
-            audio_base64 = None
+        # Guard: Only generate TTS if we have a valid message
+        if ai_message and len(ai_message.strip()) > 0:
+            try:
+                logger.info(f"🎤 Generating TTS for message ({len(ai_message)} chars)...")
+                audio_bytes_tts = await text_to_speech(
+                    text=ai_message,  # Use full message with feedback for TTS
+                    accent=accent_name,
+                    robotic=True
+                )
+                if audio_bytes_tts and len(audio_bytes_tts) > 0:
+                    audio_base64 = base64.b64encode(audio_bytes_tts).decode('utf-8')
+                    logger.info(f"✅ TTS generation successful ({len(audio_bytes_tts)} bytes)")
+                else:
+                    logger.warning("⚠️ TTS returned empty audio")
+            except Exception as tts_error:
+                logger.error(f"❌ TTS generation failed: {tts_error}", exc_info=True)
+                # Don't raise - continue without audio
+        else:
+            logger.warning("⚠️ Skipping TTS generation - empty message")
         
         total_time = time.time() - start_time
-        step_times['total'] = total_time
-        
         logger.info("=" * 80)
         logger.info(f"✅ CHAT REQUEST COMPLETED - Total time: {total_time:.2f}s")
-        logger.info(f"   Step timings:")
-        logger.info(f"     - Read audio: {step_times.get('read_audio', 0):.2f}s")
-        logger.info(f"     - Whisper transcription: {step_times.get('whisper_transcription', 0):.2f}s")
-        logger.info(f"     - Accent detection: {step_times.get('accent_detection', 0):.2f}s")
-        logger.info(f"     - Conversational response: {step_times.get('conversational_response', 0):.2f}s")
-        logger.info(f"     - TTS generation: {step_times.get('tts_generation', 0):.2f}s")
-        logger.info(f"   Response: {len(ai_message)} chars, Audio: {'Yes' if audio_base64 else 'No'}")
+        logger.info(f"   Response: {len(ai_message)} chars")
+        logger.info(f"   Accent feedback: {accent_feedback[:50] if accent_feedback else 'None'}...")
         logger.info("=" * 80)
         
         return {
             "transcribed_text": transcribed_text,
             "ai_message": ai_message,
-            "audio_base64": audio_base64,
-            "detected_user_accent": detected_user_accent,  # Include detected accent in response
-            "accent_confidence": accent_confidence
+            "accent_feedback": accent_feedback,
+            "audio_base64": audio_base64
         }
         
     except HTTPException:
-        total_time = time.time() - start_time if 'start_time' in locals() else 0
-        logger.error("=" * 80)
-        logger.error(f"❌ CHAT REQUEST FAILED (HTTPException) - Total time: {total_time:.2f}s")
-        logger.error(f"   Step timings: {step_times if 'step_times' in locals() else 'N/A'}")
-        logger.error("=" * 80)
+        # Clean up on error
+        if session_id in _active_greeting_requests:
+            del _active_greeting_requests[session_id]
         raise
     except Exception as e:
-        total_time = time.time() - start_time if 'start_time' in locals() else 0
-        logger.error("=" * 80)
-        logger.error(f"❌ CHAT REQUEST FAILED (Exception) - Total time: {total_time:.2f}s")
-        logger.error(f"   Error: {str(e)}")
-        logger.error(f"   Error type: {type(e).__name__}")
-        logger.error(f"   Step timings: {step_times if 'step_times' in locals() else 'N/A'}")
-        logger.error("=" * 80)
-        logger.error(f"Full exception traceback:", exc_info=True)
-        # Ensure temp file is cleaned up even on error
-        try:
-            if 'tmp_file_path' in locals() and os.path.exists(tmp_file_path):
-                os.unlink(tmp_file_path)
-        except:
-            pass
+        # Clean up on error
+        if session_id in _active_greeting_requests:
+            del _active_greeting_requests[session_id]
+        logger.error(f"❌ CHAT REQUEST FAILED: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to process audio: {str(e)}"
+            detail=f"Failed to process chat: {str(e)}"
         )
 
 
@@ -1113,4 +722,3 @@ async def chat_status():
         "gemini_error": GEMINI_ERROR,
         "message": "connected" if GEMINI_AVAILABLE else f"not connected ({GEMINI_STATUS})"
     }
-
