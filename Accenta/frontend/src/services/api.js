@@ -126,13 +126,16 @@ export const accentDetectionService = {
     return response.data;
   },
   
-  getPhonemeFeedback: async (referenceAudioBlob, userAudioBlob, targetText, language = null) => {
+  getPhonemeFeedback: async (referenceAudioBlob, userAudioBlob, targetText, language = null, accentEvaluationScore = null) => {
     const formData = new FormData();
     formData.append('reference_audio', referenceAudioBlob, 'reference.wav');
     formData.append('user_audio', userAudioBlob, 'user.wav');
     formData.append('target_text', targetText);
     if (language) {
       formData.append('language', language);
+    }
+    if (accentEvaluationScore !== null && accentEvaluationScore !== undefined) {
+      formData.append('accent_evaluation_score', accentEvaluationScore.toString());
     }
     
     const response = await api.post(API_ENDPOINTS.PHONEME_FEEDBACK, formData, {

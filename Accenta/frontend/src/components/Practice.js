@@ -60,6 +60,12 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   const [timeRemaining, setTimeRemaining] = useState(30);
   const timerRef = useRef(null);
   const audioRef = useRef(null);
+  const feedbackAudioRef = useRef(null); // For phoneme feedback TTS audio
+  const feedbackAnalyserRef = useRef(null); // For audio analysis during TTS
+  const feedbackAudioContextRef = useRef(null); // For Web Audio API context
+  const feedbackFrequencyDataRef = useRef(null); // For frequency data
+  const feedbackAnimationFrameRef = useRef(null); // For animation frame
+  const [feedbackAudioLevels, setFeedbackAudioLevels] = useState([]); // For visualizer bars
   const [analysisResult, setAnalysisResult] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [hasPlayedOnce, setHasPlayedOnce] = useState(false);
@@ -78,6 +84,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   const [referenceAudioBlob, setReferenceAudioBlob] = useState(null); // Store reference TTS audio
   const [phonemeFeedback, setPhonemeFeedback] = useState(null); // Store phoneme-level feedback
   const [isLoadingPhonemeFeedback, setIsLoadingPhonemeFeedback] = useState(false);
+  const [isPlayingFeedbackTTS, setIsPlayingFeedbackTTS] = useState(false);
 
   // Load profile settings from localStorage
   useEffect(() => {
@@ -188,7 +195,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       timerRef.current = setInterval(() => {
         setTimeRemaining((prev) => {
           if (prev <= 1) {
-            stopRecording();
+              stopRecording();
             return 0;
           }
           return prev - 1;
@@ -245,6 +252,32 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       return () => clearTimeout(scrollTimer);
     }
   }, [analysisResult, isProcessing]);
+
+  // Auto-play TTS when phoneme feedback is ready
+  useEffect(() => {
+    if (phonemeFeedback && !isLoadingPhonemeFeedback && !isPlayingFeedbackTTS) {
+      // Small delay to ensure UI is ready
+      const playTimer = setTimeout(() => {
+        playPhonemeFeedbackTTS().catch((error) => {
+          console.warn('Auto-play failed (this is normal if browser blocks autoplay):', error);
+        });
+      }, 500);
+      return () => clearTimeout(playTimer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phonemeFeedback, isLoadingPhonemeFeedback]);
+
+  // Cleanup: Stop TTS when component unmounts or page is left
+  useEffect(() => {
+    return () => {
+      // Stop feedback TTS if playing
+      if (feedbackAudioRef.current) {
+        feedbackAudioRef.current.pause();
+        feedbackAudioRef.current.currentTime = 0;
+        feedbackAudioRef.current = null;
+      }
+    };
+  }, []);
 
   // Animate waveform when recording - reactive to mic input
   useEffect(() => {
@@ -437,7 +470,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       
       // Only show alert for non-autoplay errors
       if (!errorMessage.includes('Audio playback blocked')) {
-        alert(`Unable to play audio: ${errorMessage}\n\nPlease ensure:\n- Backend server is running\n- ElevenLabs API key is configured\n- Check browser console for details`);
+      alert(`Unable to play audio: ${errorMessage}\n\nPlease ensure:\n- Backend server is running\n- ElevenLabs API key is configured\n- Check browser console for details`);
       }
       
       // Don't re-throw - allow user to continue
@@ -538,7 +571,8 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
             referenceAudioBlob,
             audioBlob,
             phrases[currentPhrase],
-            languageCode
+            languageCode,
+            accentEvaluationScore // Pass accent evaluation score
           );
           console.log('✅ Received phoneme feedback:', phonemeResult);
           setPhonemeFeedback(phonemeResult);
@@ -560,6 +594,25 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   };
 
   const nextPhrase = () => {
+    // Stop feedback TTS if playing
+    if (feedbackAudioRef.current) {
+      feedbackAudioRef.current.pause();
+      feedbackAudioRef.current.currentTime = 0;
+      feedbackAudioRef.current = null;
+    }
+    
+    // Clean up audio visualization
+    if (feedbackAnimationFrameRef.current) {
+      cancelAnimationFrame(feedbackAnimationFrameRef.current);
+      feedbackAnimationFrameRef.current = null;
+    }
+    if (feedbackAudioContextRef.current) {
+      feedbackAudioContextRef.current.close().catch(() => {});
+      feedbackAudioContextRef.current = null;
+    }
+    setFeedbackAudioLevels([]);
+    feedbackAnalyserRef.current = null;
+    
     if (currentPhrase < phrases.length - 1) {
       setCurrentPhrase(currentPhrase + 1);
       setShowWaveform(false);
@@ -571,9 +624,238 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       setUseFileUpload(false);
       setReferenceAudioBlob(null);
       setPhonemeFeedback(null);
+      setIsPlayingFeedbackTTS(false);
     } else {
       // Practice complete
       navigate('/dashboard', { state: { practiceComplete: true, isCurated } });
+    }
+  };
+
+  // Play phoneme feedback using TTS
+  const playPhonemeFeedbackTTS = async () => {
+    if (!phonemeFeedback || isPlayingFeedbackTTS) return;
+    
+    try {
+      setIsPlayingFeedbackTTS(true);
+      
+      // Combine feedback text into a natural script (exclude Practice Recommendations and Specific Areas)
+      let feedbackText = phonemeFeedback.feedback || '';
+      
+      // Remove "Practice Recommendations" section
+      feedbackText = feedbackText.replace(/\*\*Practice Recommendations\*\*\s*\n/g, '');
+      feedbackText = feedbackText.replace(/Practice Recommendations\s*\n/g, '');
+      feedbackText = feedbackText.replace(/-\s*Record yourself again[^\n]*/g, '');
+      feedbackText = feedbackText.replace(/-\s*Listen to the reference[^\n]*/g, '');
+      feedbackText = feedbackText.replace(/-\s*Practice saying[^\n]*/g, '');
+      feedbackText = feedbackText.replace(/-\s*Focus on matching[^\n]*/g, '');
+      feedbackText = feedbackText.replace(/-\s*Pay attention[^\n]*/g, '');
+      
+      // Remove markdown formatting for TTS
+      feedbackText = feedbackText
+        .replace(/\*\*/g, '') // Remove bold markers
+        .replace(/\*/g, '') // Remove italic markers
+        .replace(/##/g, '') // Remove headers
+        .replace(/#/g, '') // Remove headers
+        .replace(/\n\n+/g, '. ') // Replace multiple newlines with periods
+        .replace(/\n/g, ' ') // Replace single newlines with spaces
+        .trim();
+      
+      // Don't add specific improvements to TTS - user requested to exclude this
+      
+      // Get accent name for TTS (use profile accent or default to beijing)
+      const accentName = profile?.accent?.name || profile?.accent || "beijing";
+      
+      console.log('🎤 Generating TTS for phoneme feedback:', feedbackText.substring(0, 100));
+      
+      // Generate speech using TTS service
+      const audioBlob = await ttsService.generateSpeech(
+        feedbackText,
+        null, // voice_id - will use accent-based selection from backend
+        accentName, // accent name for voice selection
+        false // robotic = false (natural voice)
+      );
+      
+      if (!audioBlob || audioBlob.size === 0) {
+        throw new Error('Received empty audio blob from TTS service');
+      }
+      
+      // Create audio element and play
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      feedbackAudioRef.current = audio; // Store reference for cleanup
+      
+      // Set up Web Audio API for visualization
+      let analyser = null;
+      let audioContext = null;
+      
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // Resume audio context if suspended (required by some browsers)
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+        }
+        
+        const source = audioContext.createMediaElementSource(audio);
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256; // For frequency analysis
+        analyser.smoothingTimeConstant = 0.8; // Smooth the data
+        source.connect(analyser);
+        analyser.connect(audioContext.destination);
+        
+        feedbackAnalyserRef.current = analyser;
+        feedbackAudioContextRef.current = audioContext;
+        
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        feedbackFrequencyDataRef.current = dataArray;
+        
+        // Start visualization animation - use a function that checks the actual audio state
+        const startAnimation = () => {
+          const animate = () => {
+            const currentAudio = feedbackAudioRef.current;
+            const currentAnalyser = feedbackAnalyserRef.current;
+            
+            if (!currentAnalyser || !currentAudio || currentAudio.paused || currentAudio.ended) {
+              setFeedbackAudioLevels([]);
+              if (feedbackAnimationFrameRef.current) {
+                cancelAnimationFrame(feedbackAnimationFrameRef.current);
+                feedbackAnimationFrameRef.current = null;
+              }
+              return;
+            }
+            
+            currentAnalyser.getByteFrequencyData(dataArray);
+            
+            // Create visualizer bars (20 bars for smooth animation)
+            const barCount = 20;
+            const levels = [];
+            const step = Math.floor(bufferLength / barCount);
+            
+            for (let i = 0; i < barCount; i++) {
+              const index = i * step;
+              // Use average of nearby frequencies for smoother visualization
+              let sum = 0;
+              let count = 0;
+              for (let j = Math.max(0, index - 2); j < Math.min(bufferLength, index + 3); j++) {
+                sum += dataArray[j];
+                count++;
+              }
+              const value = (sum / count) / 255; // Normalize to 0-1
+              // Apply smoothing and boost for better visibility
+              const smoothedValue = Math.min(1, value * 2.0);
+              levels.push(smoothedValue);
+            }
+            
+            setFeedbackAudioLevels(levels);
+            feedbackAnimationFrameRef.current = requestAnimationFrame(animate);
+          };
+          
+          animate();
+        };
+        
+        // Start animation after audio starts playing
+        audio.addEventListener('play', () => {
+          console.log('🎵 Audio started playing, starting visualizer');
+          startAnimation();
+        }, { once: true });
+        
+        // Also try to start immediately in case play event already fired
+        if (!audio.paused) {
+          startAnimation();
+        }
+        
+      } catch (error) {
+        console.warn('Could not set up audio visualization:', error);
+      }
+      
+      // Clean up URL when done
+      audio.addEventListener('ended', () => {
+        console.log('🎵 Audio ended, cleaning up visualizer');
+        URL.revokeObjectURL(audioUrl);
+        setIsPlayingFeedbackTTS(false);
+        setFeedbackAudioLevels([]);
+        feedbackAudioRef.current = null;
+        
+        // Clean up audio context
+        if (feedbackAnimationFrameRef.current) {
+          cancelAnimationFrame(feedbackAnimationFrameRef.current);
+          feedbackAnimationFrameRef.current = null;
+        }
+        if (feedbackAudioContextRef.current) {
+          feedbackAudioContextRef.current.close().catch(() => {});
+          feedbackAudioContextRef.current = null;
+        }
+        feedbackAnalyserRef.current = null;
+      });
+      
+      audio.addEventListener('error', (error) => {
+        console.error('Error playing feedback audio:', error);
+        URL.revokeObjectURL(audioUrl);
+        setIsPlayingFeedbackTTS(false);
+        setFeedbackAudioLevels([]);
+        feedbackAudioRef.current = null;
+        
+        // Clean up audio context
+        if (feedbackAnimationFrameRef.current) {
+          cancelAnimationFrame(feedbackAnimationFrameRef.current);
+          feedbackAnimationFrameRef.current = null;
+        }
+        if (feedbackAudioContextRef.current) {
+          feedbackAudioContextRef.current.close().catch(() => {});
+          feedbackAudioContextRef.current = null;
+        }
+        feedbackAnalyserRef.current = null;
+      });
+      
+      audio.volume = 1.0;
+      await audio.play();
+      
+      // Start animation immediately after play() resolves
+      if (analyser && !audio.paused) {
+        const animate = () => {
+          const currentAudio = feedbackAudioRef.current;
+          const currentAnalyser = feedbackAnalyserRef.current;
+          
+          if (!currentAnalyser || !currentAudio || currentAudio.paused || currentAudio.ended) {
+            setFeedbackAudioLevels([]);
+            if (feedbackAnimationFrameRef.current) {
+              cancelAnimationFrame(feedbackAnimationFrameRef.current);
+              feedbackAnimationFrameRef.current = null;
+            }
+            return;
+          }
+          
+          currentAnalyser.getByteFrequencyData(feedbackFrequencyDataRef.current);
+          
+          const barCount = 20;
+          const levels = [];
+          const step = Math.floor(feedbackFrequencyDataRef.current.length / barCount);
+          
+          for (let i = 0; i < barCount; i++) {
+            const index = i * step;
+            let sum = 0;
+            let count = 0;
+            for (let j = Math.max(0, index - 2); j < Math.min(feedbackFrequencyDataRef.current.length, index + 3); j++) {
+              sum += feedbackFrequencyDataRef.current[j];
+              count++;
+            }
+            const value = (sum / count) / 255;
+            const smoothedValue = Math.min(1, value * 2.0);
+            levels.push(smoothedValue);
+          }
+          
+          setFeedbackAudioLevels(levels);
+          feedbackAnimationFrameRef.current = requestAnimationFrame(animate);
+        };
+        
+        animate();
+      }
+      
+    } catch (error) {
+      console.error('Error playing phoneme feedback TTS:', error);
+      setIsPlayingFeedbackTTS(false);
+      alert('Failed to play feedback audio. Please try again.');
     }
   };
 
@@ -584,6 +866,25 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     setUploadedFile(null);
     setBarWidth(0);
     setPhonemeFeedback(null);
+    setIsPlayingFeedbackTTS(false);
+    // Stop feedback TTS if playing
+    if (feedbackAudioRef.current) {
+      feedbackAudioRef.current.pause();
+      feedbackAudioRef.current.currentTime = 0;
+      feedbackAudioRef.current = null;
+    }
+    
+    // Clean up audio visualization
+    if (feedbackAnimationFrameRef.current) {
+      cancelAnimationFrame(feedbackAnimationFrameRef.current);
+      feedbackAnimationFrameRef.current = null;
+    }
+    if (feedbackAudioContextRef.current) {
+      feedbackAudioContextRef.current.close().catch(() => {});
+      feedbackAudioContextRef.current = null;
+    }
+    setFeedbackAudioLevels([]);
+    feedbackAnalyserRef.current = null;
   };
 
   const handleFileUpload = async (file) => {
@@ -667,7 +968,8 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
             referenceAudioBlob,
             file,
             phrases[currentPhrase],
-            languageCode
+            languageCode,
+            accentEvaluationScore // Pass accent evaluation score
           );
           console.log('✅ Received phoneme feedback:', phonemeResult);
           setPhonemeFeedback(phonemeResult);
@@ -750,6 +1052,17 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
           }
         }
         
+        @keyframes loadingBar {
+          0%, 100% {
+            transform: scaleY(0.3);
+            opacity: 0.7;
+          }
+          50% {
+            transform: scaleY(1);
+            opacity: 1;
+          }
+        }
+        
         @keyframes circleFill {
           0% {
             stroke-dashoffset: 314.16;
@@ -759,7 +1072,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
           }
         }
       `}</style>
-      <div className={`min-h-screen bg-gradient-to-br ${currentColorScheme.backgroundGradient} flex flex-col opacity-90`}>
+    <div className={`min-h-screen bg-gradient-to-br ${currentColorScheme.backgroundGradient} flex flex-col opacity-90`}>
       {/* Progress Bar at Top */}
       <div className={`w-full px-4 pt-4 pb-2 transition-all duration-700 ${
         isMounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'
@@ -1177,7 +1490,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
                       <p className="text-lg font-bold text-gray-800 capitalize">
                         {analysisResult.target_accent || 'N/A'}
                       </p>
-                    </div>
+                </div>
                   </div>
                   
                   <p className="text-xs text-gray-600 mt-3 text-center">
@@ -1191,16 +1504,70 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
               
               {/* Phoneme-Level Feedback */}
               {phonemeFeedback && !isLoadingPhonemeFeedback && (
-                <div className="mt-6 p-6 bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 rounded-2xl border-2 border-indigo-200 shadow-lg">
-                  <h3 className="text-xl font-bold text-gray-800 mb-4">🎯 Detailed Phoneme Analysis</h3>
-                  
+                <div className="mt-6 p-6 bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 rounded-2xl border-2 border-indigo-200 shadow-lg relative">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl font-bold text-gray-800">🎯 Detailed Phoneme Analysis</h3>
+                    <div className="flex items-center gap-3">
+                      {/* Audio Visualizer - shows when TTS is playing */}
+                      {isPlayingFeedbackTTS && (
+                        <div className="flex items-end gap-0.5 h-10 px-3 bg-indigo-100 rounded-full">
+                          {feedbackAudioLevels.length > 0 ? (
+                            feedbackAudioLevels.map((level, i) => (
+                              <div
+                                key={i}
+                                className="w-1.5 bg-gradient-to-t from-indigo-500 via-purple-500 to-pink-500 rounded-full"
+                                style={{
+                                  height: `${Math.max(8, level * 100)}%`,
+                                  minHeight: '8px',
+                                  transition: 'height 0.1s ease-out'
+                                }}
+                              />
+                            ))
+                          ) : (
+                            // Show placeholder bars while initializing
+                            Array.from({ length: 20 }).map((_, i) => (
+                              <div
+                                key={i}
+                                className="w-1.5 bg-indigo-300 rounded-full"
+                                style={{
+                                  height: '8px'
+                                }}
+                              />
+                            ))
+                          )}
+                        </div>
+                      )}
+                      <button
+                        onClick={playPhonemeFeedbackTTS}
+                        disabled={isPlayingFeedbackTTS}
+                        className={`p-2 rounded-full transition-all duration-200 ${
+                          isPlayingFeedbackTTS
+                            ? 'bg-indigo-600 text-white cursor-not-allowed'
+                            : 'bg-indigo-100 hover:bg-indigo-200 text-indigo-700 hover:text-indigo-800'
+                        }`}
+                        title="Listen to feedback"
+                      >
+                        {isPlayingFeedbackTTS ? (
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                          </svg>
+                        )}
+                      </button>
+                </div>
+              </div>
+
                   <div className="space-y-4">
                     {/* Transcriptions */}
                     <div className="grid grid-cols-2 gap-4">
                       <div className="bg-white/70 rounded-lg p-3 border border-gray-200">
                         <p className="text-xs text-gray-600 mb-1">Target Text</p>
                         <p className="text-sm font-semibold text-gray-800">{phonemeFeedback.target_text}</p>
-                      </div>
+                </div>
                       <div className="bg-white/70 rounded-lg p-3 border border-gray-200">
                         <p className="text-xs text-gray-600 mb-1">You Said</p>
                         <p className="text-sm font-semibold text-gray-800">{phonemeFeedback.user_text}</p>
@@ -1227,52 +1594,57 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
                             'text-red-600'
                           }`}>
                             {(phonemeFeedback.similarity_score * 100).toFixed(1)}%
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    
+                      </span>
+                </div>
+                </div>
+              </div>
+
                     {/* Gemini Feedback */}
                     <div className="bg-white/70 rounded-lg p-4 border border-gray-200">
                       <p className="text-sm font-semibold text-gray-800 mb-2">📝 Pronunciation Feedback</p>
                       <div className="text-sm text-gray-700 whitespace-pre-wrap">
                         {phonemeFeedback.feedback}
-                      </div>
+                </div>
                     </div>
                     
-                    {/* Specific Improvements */}
-                    {phonemeFeedback.specific_improvements && phonemeFeedback.specific_improvements.length > 0 && (
-                      <div className="bg-white/70 rounded-lg p-4 border border-gray-200">
-                        <p className="text-sm font-semibold text-gray-800 mb-2">✨ Specific Areas to Improve</p>
-                        <ul className="space-y-2">
-                          {phonemeFeedback.specific_improvements.map((improvement, idx) => (
-                            <li key={idx} className="text-sm text-gray-700 flex items-start">
-                              <span className="text-indigo-500 mr-2">•</span>
-                              <span>{improvement}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
                   </div>
                 </div>
               )}
               
               {/* Loading indicator for phoneme feedback */}
               {isLoadingPhonemeFeedback && (
-                <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                  <p className="text-sm text-blue-700">🔄 Analyzing phoneme-level pronunciation differences...</p>
+                <div className="mt-6 p-6 bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 rounded-2xl border-2 border-indigo-200 shadow-lg">
+                  <div className="flex items-center justify-center space-x-4">
+                    {/* Animated loading bars */}
+                    <div className="flex items-end space-x-1 h-12">
+                      {[0, 1, 2, 3, 4].map((i) => (
+                        <div
+                          key={i}
+                          className="w-2 bg-gradient-to-t from-indigo-500 to-purple-500 rounded-full"
+                          style={{
+                            animation: `loadingBar ${1.2}s ease-in-out infinite`,
+                            animationDelay: `${i * 0.15}s`,
+                            height: '100%'
+                          }}
+                        />
+                      ))}
+                    </div>
+                    <div className="flex flex-col">
+                      <p className="text-sm font-semibold text-indigo-700">Analyzing pronunciation...</p>
+                      <p className="text-xs text-indigo-500 mt-1">Extracting phonemes and comparing</p>
+                    </div>
+                  </div>
                 </div>
               )}
 
               {/* Action Buttons */}
               <div className="flex gap-4 mt-6">
-                  <button
-                    onClick={retry}
-                    className="flex-1 bg-yellow-500 text-white rounded-lg py-3 font-semibold hover:bg-yellow-600 transition-colors"
-                  >
+                      <button
+                        onClick={retry}
+                        className="flex-1 bg-yellow-500 text-white rounded-lg py-3 font-semibold hover:bg-yellow-600 transition-colors"
+                      >
                   Try Again
-                  </button>
+                      </button>
                 <button
                   onClick={nextPhrase}
                   className="flex-1 bg-accenta-primary text-white rounded-lg py-3 font-semibold hover:bg-accenta-secondary transition-colors"

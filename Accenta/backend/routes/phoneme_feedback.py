@@ -95,7 +95,8 @@ async def analyze_phoneme_pronunciation(
     reference_audio: UploadFile = File(..., description="Reference/TTS audio file"),
     user_audio: UploadFile = File(..., description="User's spoken audio file"),
     target_text: str = Form(..., description="Expected text (what should be said)"),
-    language: Optional[str] = Form(None, description="Language code (e.g., 'en')")
+    language: Optional[str] = Form(None, description="Language code (e.g., 'en')"),
+    accent_evaluation_score: Optional[float] = Form(None, description="Accent evaluation score (0-100)")
 ):
     """
     Analyze pronunciation at phoneme level by comparing reference and user audio
@@ -167,9 +168,11 @@ async def analyze_phoneme_pronunciation(
         step_start = time.time()
         logger.info("🔄 Generating phoneme-level feedback...")
         
-        # Try to initialize Gemini if not available (in case it was a transient error)
+        # Always try to use Gemini - initialize if needed
         gemini_available_now = GEMINI_AVAILABLE
         gemini_model_name_now = GEMINI_MODEL_NAME
+        
+        # Try to initialize Gemini if not available (in case it was a transient error)
         if not GEMINI_AVAILABLE:
             logger.info("Gemini not available at startup, attempting to initialize now...")
             try:
@@ -198,106 +201,101 @@ async def analyze_phoneme_pronunciation(
                             error_msg = str(model_error)
                             # Check if it's a quota error
                             if "429" in error_msg or "quota" in error_msg.lower():
-                                logger.warning(f"Model {model_name} quota exceeded - will use fallback feedback")
+                                logger.warning(f"Model {model_name} quota exceeded - will try others")
                             elif "404" in error_msg:
                                 logger.debug(f"Model {model_name} not found (404)")
                             else:
                                 logger.warning(f"Model {model_name} failed: {error_msg[:200]}")
                             continue
                     if not gemini_available_now:
-                        logger.warning(f"All {len(model_names)} Gemini models failed to initialize")
+                        logger.warning(f"All {len(model_names)} Gemini models failed to initialize, but will still attempt call")
                 else:
-                    logger.warning("No valid API key found for Gemini initialization")
+                    logger.warning("No valid API key found for Gemini initialization, but will still attempt call")
             except Exception as e:
                 logger.error(f"Gemini initialization retry failed with exception: {e}", exc_info=True)
+                logger.info("Will still attempt Gemini call despite initialization error")
         
-        # Use gemini_available_now instead of GEMINI_AVAILABLE
-        if not gemini_available_now:
-            logger.warning("Gemini not available - using fallback feedback generation")
-            # Generate basic feedback from phoneme analysis
-            full_feedback = f"""**Overall Assessment**
-Your pronunciation of "{target_text}" was transcribed as "{user_text}". 
+        # ALWAYS attempt Gemini call first, regardless of initialization status
+        # Only use fallback if the actual API call fails
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("OPENAI_API_KEY")
+        gemini_call_successful = False
+        full_feedback = None
+        specific_improvements = []
+        
+        # Try Gemini call if we have an API key (even if initialization seemed to fail)
+        if api_key and api_key != "YOUR_GOOGLE_API_KEY_HERE" and api_key.strip():
+            logger.info("Attempting Gemini API call for feedback generation...")
+            try:
+                # Ensure Gemini is configured
+                if not gemini_available_now:
+                    try:
+                        genai.configure(api_key=api_key)
+                        # Try to find a working model
+                        model_names = [
+                            "models/gemini-2.5-flash",
+                            "models/gemini-2.0-flash",
+                            "models/gemini-flash-latest",
+                            "models/gemini-pro-latest",
+                        ]
+                        for model_name in model_names:
+                            try:
+                                test_model = genai.GenerativeModel(model_name)
+                                test_response = test_model.generate_content("test")
+                                if test_response and test_response.text:
+                                    gemini_model_name_now = model_name
+                                    logger.info(f"✓ Found working Gemini model: {model_name}")
+                                    break
+                            except:
+                                continue
+                    except:
+                        pass  # Will try anyway with default model
+                
+                # Build structured data for Gemini
+                differences_summary = []
+                for diff in phoneme_analysis['differences'][:10]:  # Limit to top 10 differences
+                    differences_summary.append({
+                        "phoneme": f"{diff.get('target_phonemes', '')}→{diff.get('user_phonemes', '')}",
+                        "issue": diff.get('issue', ''),
+                        "type": diff.get('type', 'unknown')
+                    })
+                
+                # Create prompt for Gemini - conversational, script-like feedback for TTS
+                accent_score_context = ""
+                if accent_evaluation_score is not None:
+                    if accent_evaluation_score >= 85:
+                        accent_score_context = f"Great news! Your accent evaluation score is {accent_evaluation_score:.0f}% - that's excellent! Acknowledge this achievement, but still provide specific phoneme-level feedback to help them maintain or improve further."
+                    elif accent_evaluation_score >= 70:
+                        accent_score_context = f"Your accent evaluation score is {accent_evaluation_score:.0f}% - that's good progress! Acknowledge this, but provide specific advice on how to improve further."
+                    elif accent_evaluation_score >= 50:
+                        accent_score_context = f"Your accent evaluation score is {accent_evaluation_score:.0f}% - there's room for improvement. Address this directly and provide specific advice on how to improve your accent replication."
+                    else:
+                        accent_score_context = f"Your accent evaluation score is {accent_evaluation_score:.0f}% - this needs significant improvement. Address this directly and provide specific, actionable advice on how to better replicate the target accent."
+                
+                prompt = f"""You are a friendly pronunciation coach. The user said "{user_text}" but should have said "{target_text}".
 
-"""
-            
-            if phoneme_analysis['similarity_score'] >= 0.9:
-                full_feedback += "Excellent work! Your pronunciation is very close to the target accent. "
-            elif phoneme_analysis['similarity_score'] >= 0.7:
-                full_feedback += "Good pronunciation! You're making progress. "
-            elif phoneme_analysis['similarity_score'] >= 0.5:
-                full_feedback += "Keep practicing! There are some differences to work on. "
-            else:
-                full_feedback += "There are noticeable differences from the target pronunciation. "
-            
-            full_feedback += f"Your phoneme similarity score is {phoneme_analysis['similarity_score']*100:.1f}%.\n\n"
-            
-            # Add specific differences
-            if phoneme_analysis['differences']:
-                full_feedback += "**Specific Phoneme Issues**\n"
-                for diff in phoneme_analysis['differences'][:5]:
-                    if diff.get('type') == 'phoneme_mismatch':
-                        full_feedback += f"- The phoneme '{diff.get('target_phonemes', '')}' should be pronounced, but you said '{diff.get('user_phonemes', '')}'. "
-                    elif diff.get('type') == 'missing_phoneme':
-                        full_feedback += f"- You're missing the phoneme '{diff.get('target_phonemes', '')}'. "
-                    elif diff.get('type') == 'extra_phoneme':
-                        full_feedback += f"- You added an extra phoneme '{diff.get('user_phonemes', '')}'. "
-                full_feedback += "\n\n"
-            
-            full_feedback += "**Practice Recommendations**\n"
-            full_feedback += "- Listen to the reference audio carefully and try to match the sounds.\n"
-            full_feedback += "- Practice saying the phrase slowly, focusing on each sound.\n"
-            full_feedback += "- Record yourself again and compare with the reference."
-            
-            # Extract improvements from differences
-            specific_improvements = []
-            for diff in phoneme_analysis['differences'][:5]:
-                if diff.get('issue'):
-                    specific_improvements.append(diff.get('issue'))
-            
-            if len(specific_improvements) == 0:
-                specific_improvements = [
-                    "Focus on matching the target phonemes",
-                    "Practice the specific sounds that differ",
-                    "Listen carefully to the reference pronunciation"
-                ]
-            
-            step_times['gemini_feedback'] = time.time() - step_start
-            logger.info(f"✅ Generated fallback feedback ({step_times['gemini_feedback']:.2f}s)")
-        else:
-            # Use Gemini for detailed feedback
-            logger.info("Using Gemini for detailed phoneme feedback...")
-            # Build structured data for Gemini
-            differences_summary = []
-            for diff in phoneme_analysis['differences'][:10]:  # Limit to top 10 differences
-                differences_summary.append({
-                    "phoneme": f"{diff.get('target_phonemes', '')}→{diff.get('user_phonemes', '')}",
-                    "issue": diff.get('issue', ''),
-                    "type": diff.get('type', 'unknown')
-                })
-            
-            structured_data = {
-                "target_sentence": target_text,
-                "target_phonemes": phoneme_analysis['target_phonemes'],
-                "user_phonemes": phoneme_analysis['user_phonemes'],
-                "differences": differences_summary,
-                "confidence_score": phoneme_analysis['similarity_score']
-            }
-            
-            # Create prompt for Gemini - conversational, script-like feedback for TTS
-            prompt = f"""You are a friendly pronunciation coach. The user said "{user_text}" but should have said "{target_text}".
+{accent_score_context}
 
 Analyze the differences and provide natural, conversational feedback that sounds like you're speaking directly to them. Write it as a script for text-to-speech - no markdown, just natural speech.
 
-Focus on specific words they mispronounced. For example, if they said "gahn" instead of "can", say: "You said 'gahn' instead of 'can'. Try saying 'can' with a clear 'k' sound at the beginning."
+Your feedback should address BOTH:
+1. The overall accent evaluation score (if provided) - acknowledge good work or provide encouragement for improvement
+2. Specific phoneme-level word mistakes - point out exact words they mispronounced
+
+For example, if they said "gahn" instead of "can", say: "You said 'gahn' instead of 'can'. Try saying 'can' with a clear 'k' sound at the beginning."
+
+IMPORTANT: Even if phoneme similarity is 100%, still provide dynamic feedback based on:
+- The accent evaluation score (acknowledge good work or provide improvement advice)
+- Any subtle differences in pronunciation, rhythm, or accent characteristics
+- Specific words or sounds that could be improved even if phonemes match
 
 Structure your response as natural speech:
-1. Start with overall assessment (1-2 sentences)
-2. Point out specific word mistakes with examples (2-4 specific corrections)
-3. Give 2-3 simple practice tips
+1. Start with accent evaluation acknowledgment (if score provided) - 1-2 sentences about their overall accent performance
+2. Address phoneme-level details - even if similarity is high, point out any subtle differences or areas for improvement
+3. Point out specific word mistakes with examples (2-4 specific corrections) - be specific about which words and sounds
+4. Give 2-3 simple practice tips that address both accent replication and phoneme accuracy
 
-Keep it encouraging, conversational, and easy to understand. Write as if you're speaking to them, not writing a document."""
+Keep it encouraging, conversational, and easy to understand. Write as if you're speaking to them, not writing a document. Always provide specific, actionable feedback even when scores are high."""
 
-            try:
                 model = genai.GenerativeModel(gemini_model_name_now)
                 generation_config = {
                     "temperature": 0.7,
@@ -333,97 +331,99 @@ Keep it encouraging, conversational, and easy to understand. Write as if you're 
                 
                 if not full_feedback:
                     raise Exception("Gemini returned empty response")
+                
+                # Extract specific improvements from conversational feedback
+                sentences = [s.strip() for s in full_feedback.replace('!', '.').replace('?', '.').split('.') if s.strip()]
+                for sentence in sentences:
+                    sentence_lower = sentence.lower()
+                    if any(keyword in sentence_lower for keyword in ['instead of', 'try saying', 'practice', 'focus on', 'work on', 'sound', 'pronounce']):
+                        if len(sentence) > 15 and len(sentence) < 200:
+                            specific_improvements.append(sentence)
+                            if len(specific_improvements) >= 5:
+                                break
+                
+                if len(specific_improvements) < 3:
+                    for sentence in sentences:
+                        if sentence not in specific_improvements and len(sentence) > 20 and len(sentence) < 150:
+                            specific_improvements.append(sentence)
+                            if len(specific_improvements) >= 5:
+                                break
+                
+                gemini_call_successful = True
+                step_times['gemini_feedback'] = time.time() - step_start
+                logger.info(f"✅ Generated Gemini feedback ({step_times['gemini_feedback']:.2f}s)")
+                
             except Exception as gemini_error:
                 logger.error(f"Gemini API call failed: {gemini_error}", exc_info=True)
-                # Fall back to basic feedback if Gemini call fails
-                logger.warning("Falling back to basic feedback due to Gemini error")
-                # Generate fallback feedback (same as the else branch)
-                full_feedback = f"""**Overall Assessment**
-Your pronunciation of "{target_text}" was transcribed as "{user_text}". 
-
-"""
-                
-                if phoneme_analysis['similarity_score'] >= 0.9:
-                    full_feedback += "Excellent work! Your pronunciation is very close to the target accent. "
-                elif phoneme_analysis['similarity_score'] >= 0.7:
-                    full_feedback += "Good pronunciation! You're making progress. "
-                elif phoneme_analysis['similarity_score'] >= 0.5:
-                    full_feedback += "Keep practicing! There are some differences to work on. "
+                logger.warning("Falling back to dynamic feedback due to Gemini error")
+                gemini_call_successful = False
+        
+        # Use fallback only if Gemini call failed
+        if not gemini_call_successful:
+            logger.info("Using dynamic fallback feedback generation")
+            # Generate dynamic feedback from phoneme analysis and accent score
+            full_feedback = ""
+            
+            # Address accent evaluation score if provided
+            if accent_evaluation_score is not None:
+                if accent_evaluation_score >= 85:
+                    full_feedback += f"Great work on your accent! Your accent evaluation score is {accent_evaluation_score:.0f}%, which shows you're doing an excellent job replicating the target accent. "
+                elif accent_evaluation_score >= 70:
+                    full_feedback += f"Your accent evaluation score is {accent_evaluation_score:.0f}% - that's good progress! Keep working on matching the target accent more closely. "
+                elif accent_evaluation_score >= 50:
+                    full_feedback += f"Your accent evaluation score is {accent_evaluation_score:.0f}% - there's room for improvement in replicating the target accent. Focus on matching the accent characteristics more closely. "
                 else:
-                    full_feedback += "There are noticeable differences from the target pronunciation. "
-                
-                full_feedback += f"Your phoneme similarity score is {phoneme_analysis['similarity_score']*100:.1f}%.\n\n"
-                
-                # Add specific differences
-                if phoneme_analysis['differences']:
-                    full_feedback += "**Specific Phoneme Issues**\n"
-                    for diff in phoneme_analysis['differences'][:5]:
-                        if diff.get('type') == 'phoneme_mismatch':
-                            full_feedback += f"- The phoneme '{diff.get('target_phonemes', '')}' should be pronounced, but you said '{diff.get('user_phonemes', '')}'. "
-                        elif diff.get('type') == 'missing_phoneme':
-                            full_feedback += f"- You're missing the phoneme '{diff.get('target_phonemes', '')}'. "
-                        elif diff.get('type') == 'extra_phoneme':
-                            full_feedback += f"- You added an extra phoneme '{diff.get('user_phonemes', '')}'. "
-                    full_feedback += "\n\n"
-                
-                full_feedback += "**Practice Recommendations**\n"
-                full_feedback += "- Listen to the reference audio carefully and try to match the sounds.\n"
-                full_feedback += "- Practice saying the phrase slowly, focusing on each sound.\n"
-                full_feedback += "- Record yourself again and compare with the reference."
-                
-                # Set improvements from differences
-                specific_improvements = []
+                    full_feedback += f"Your accent evaluation score is {accent_evaluation_score:.0f}% - this needs significant improvement. Work on better replicating the target accent's characteristics. "
+            
+            # Address phoneme-level differences
+            full_feedback += f"Your pronunciation of \"{target_text}\" was transcribed as \"{user_text}\". "
+            
+            if phoneme_analysis['similarity_score'] >= 0.95:
+                full_feedback += "Your phoneme accuracy is excellent - the sounds match very closely. "
+            elif phoneme_analysis['similarity_score'] >= 0.8:
+                full_feedback += "Your phoneme accuracy is good, with just minor differences. "
+            elif phoneme_analysis['similarity_score'] >= 0.6:
+                full_feedback += "There are some phoneme differences to work on. "
+            else:
+                full_feedback += "There are noticeable phoneme differences that need attention. "
+            
+            full_feedback += f"Your phoneme similarity score is {phoneme_analysis['similarity_score']*100:.1f}%.\n\n"
+            
+            # Add specific phoneme differences with word-level context
+            if phoneme_analysis['differences']:
+                full_feedback += "**Specific Issues to Address**\n"
                 for diff in phoneme_analysis['differences'][:5]:
-                    if diff.get('issue'):
-                        specific_improvements.append(diff.get('issue'))
-                
-                if len(specific_improvements) == 0:
-                    specific_improvements = [
-                        "Focus on matching the target phonemes",
-                        "Practice the specific sounds that differ",
-                        "Listen carefully to the reference pronunciation"
-                    ]
-                
-                step_times['gemini_feedback'] = time.time() - step_start
-                logger.info(f"✅ Generated fallback feedback after Gemini error ({step_times['gemini_feedback']:.2f}s)")
-                # Skip to response building
-                return PhonemeFeedbackResponse(
-                    target_text=target_text,
-                    user_text=user_text,
-                    target_phonemes=phoneme_analysis['target_phonemes'],
-                    user_phonemes=phoneme_analysis['user_phonemes'],
-                    similarity_score=phoneme_analysis['similarity_score'],
-                    differences=phoneme_analysis['differences'],
-                    feedback=full_feedback,
-                    specific_improvements=specific_improvements[:5],
-                    confidence_score=phoneme_analysis['confidence_score']
-                )
+                    target_ph = diff.get('target_phonemes', '').strip()
+                    user_ph = diff.get('user_phonemes', '').strip()
+                    if diff.get('type') == 'phoneme_mismatch' and target_ph and user_ph:
+                        # Try to identify which word this might be from
+                        full_feedback += f"You pronounced the sound '{user_ph}' instead of '{target_ph}'. "
+                    elif diff.get('type') == 'missing_phoneme' and target_ph:
+                        full_feedback += f"You're missing the sound '{target_ph}'. Make sure to include all the sounds in each word. "
+                    elif diff.get('type') == 'extra_phoneme' and user_ph:
+                        full_feedback += f"You added an extra sound '{user_ph}' that shouldn't be there. "
+                full_feedback += "\n\n"
+            else:
+                if phoneme_analysis['similarity_score'] >= 0.95:
+                    full_feedback += "Your phoneme accuracy is spot-on! All the sounds match perfectly.\n\n"
             
-            # Extract specific improvements from conversational feedback
-            # Look for sentences that mention specific words or sounds
+            # Practice recommendations removed per user request
+            
+            # Extract improvements from differences
             specific_improvements = []
-            sentences = [s.strip() for s in full_feedback.replace('!', '.').replace('?', '.').split('.') if s.strip()]
+            for diff in phoneme_analysis['differences'][:5]:
+                if diff.get('issue'):
+                    specific_improvements.append(diff.get('issue'))
             
-            # Look for sentences that contain specific corrections (mentions of words, sounds, or practice tips)
-            for sentence in sentences:
-                sentence_lower = sentence.lower()
-                # Look for sentences that mention specific words, sounds, or give practice advice
-                if any(keyword in sentence_lower for keyword in ['instead of', 'try saying', 'practice', 'focus on', 'work on', 'sound', 'pronounce']):
-                    if len(sentence) > 15 and len(sentence) < 200:  # Reasonable length for TTS
-                        specific_improvements.append(sentence)
-                        if len(specific_improvements) >= 5:
-                            break
-            
-            # If we don't have enough, add other meaningful sentences
-            if len(specific_improvements) < 3:
-                for sentence in sentences:
-                    if sentence not in specific_improvements and len(sentence) > 20 and len(sentence) < 150:
-                        specific_improvements.append(sentence)
-                        if len(specific_improvements) >= 5:
-                            break
+            if len(specific_improvements) == 0:
+                if accent_evaluation_score is not None and accent_evaluation_score < 85:
+                    specific_improvements.append(f"Work on improving your accent evaluation score from {accent_evaluation_score:.0f}% to 85%+")
+                if phoneme_analysis['similarity_score'] < 0.95:
+                    specific_improvements.append("Focus on matching the exact phonemes in each word")
+                specific_improvements.append("Listen carefully to the reference pronunciation and practice matching it")
             
             step_times['gemini_feedback'] = time.time() - step_start
-            logger.info(f"✅ Generated feedback ({step_times['gemini_feedback']:.2f}s)")
+            logger.info(f"✅ Generated dynamic fallback feedback ({step_times['gemini_feedback']:.2f}s)")
         
         # Build response
         total_time = time.time() - start_time
