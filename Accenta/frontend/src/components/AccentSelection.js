@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { profileManager } from '../utils/profileManager';
 
 const AccentSelection = () => {
   const location = useLocation();
@@ -12,10 +13,23 @@ const AccentSelection = () => {
   }
 
   const handleAccentSelect = (accent) => {
+    const existingProfile = profileManager.getProfile(language.id, accent.id);
+
+    if (existingProfile) {
+      profileManager.setCurrentProfile(existingProfile);
+      navigate('/dashboard', {
+        state: {
+          fromAccentSelection: true,
+          profileId: existingProfile.id,
+        },
+      });
+      return;
+    }
+
     navigate('/survey', {
       state: {
-        language: language,
-        accent: accent,
+        language,
+        accent,
       },
     });
   };

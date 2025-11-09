@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { authService } from '../services/api';
-import { SKILL_LEVELS } from '../data/skills';
+import { SKILL_LEVELS, getSkillsForAccent } from '../data/skills';
+import { profileManager } from '../utils/profileManager';
 
 const Survey = () => {
   const location = useLocation();
@@ -80,22 +81,39 @@ const Survey = () => {
     }
   };
 
-  const handleSkillLevelSelect = (skillLevel) => {
-    setSelectedSkillLevel(skillLevel);
-    // Navigate to practice transition screen
-    navigate('/practice-transition', {
-      state: {
-        profile: {
-          language: language,
-          accent: accent,
-          overallScore: (skillLevel.min + skillLevel.max) / 2, // Use midpoint of skill level range
-          skillLevel: skillLevel,
-        },
-        accent: accent,
-        fromSurvey: true,
-        learningReason: selectedReason,
-      },
-    });
+const handleSkillLevelSelect = (skillLevel) => {
+  if (!skillLevel) return;
+  setSelectedSkillLevel(skillLevel);
+  const overallScore = (skillLevel.min + skillLevel.max) / 2;
+  const languageId = typeof language === 'object' ? language.id : language;
+  const accentId = typeof accent === 'object' ? accent.id : accent;
+  const defaultSkills = getSkillsForAccent(languageId, accentId).map((skill) => ({
+    ...skill,
+    score: Math.round(overallScore),
+  }));
+
+  const createdProfile = profileManager.upsertProfile({
+    language,
+    accent,
+    overallScore,
+    skillLevel,
+    learningReason: selectedReason,
+    totalSessions: 0,
+    practiceTime: 0,
+    struggleAreas: [],
+    skills: defaultSkills,
+  });
+
+  profileManager.setCurrentProfile(createdProfile);
+
+  navigate('/first-practice-intro', {
+    state: {
+      profile: createdProfile,
+      accent,
+      fromSurvey: true,
+      learningReason: selectedReason,
+    },
+  });
   };
 
   const skillLevels = [
@@ -310,7 +328,7 @@ const Survey = () => {
               {skillLevels.map((level) => (
                 <button
                   key={level.id}
-                  onClick={() => handleSkillLevelSelect(level)}
+                  onClick={() => setSelectedSkillLevel(level)}
                   className={`bg-white/95 backdrop-blur-sm border-2 rounded-2xl p-6 hover:shadow-2xl hover:scale-105 transition-all duration-300 text-center group relative overflow-hidden ${
                     selectedSkillLevel?.id === level.id
                       ? 'border-blue-500 shadow-xl scale-[1.02]'

@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
 import WaveformVisualization from './WaveformVisualization';
 import { ttsService, accentDetectionService } from '../services/api';
 import { getPracticePhrases } from '../data/languagePrompts';
+import { profileManager } from '../utils/profileManager';
 
 // Default practice phrases (fallback) - Short single sentences
 export const PRACTICE_PHRASES = [
@@ -32,25 +33,27 @@ export const PRACTICE_PHRASES = [
 const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCurated }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { profile: locationProfile, fromInitialTest, fromSurvey, customPhrases: locationCustomPhrases } = location.state || {};
+  const {
+    profile: locationProfile,
+    fromInitialTest,
+    fromSurvey,
+    customPhrases: locationCustomPhrases,
+    timedMode: locationTimedMode,
+    timedSettings: locationTimedSettings,
+  } = location.state || {};
   
   // State for profile that can be updated dynamically
-  const [profile, setProfile] = useState(propProfile || locationProfile);
+  const [profile, setProfile] = useState(() => propProfile || locationProfile || profileManager.getCurrentProfile());
   
   // Load profile from localStorage if not provided via props/location
   useEffect(() => {
     if (!profile) {
-      const storedProfile = localStorage.getItem('currentProfile');
+      const storedProfile = profileManager.getCurrentProfile();
       if (storedProfile) {
-        try {
-          const parsed = JSON.parse(storedProfile);
-          setProfile(parsed);
-        } catch (error) {
-          console.error('Error parsing stored profile:', error);
-        }
+        setProfile(storedProfile);
       }
     }
-  }, []);
+  }, [profile]);
   
   // Listen for profile changes from dropdown
   useEffect(() => {
@@ -64,12 +67,13 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     };
     
     const handleStorageChange = (event) => {
-      if (event.key === 'currentProfile') {
-        try {
-          const newProfile = JSON.parse(event.newValue);
+      if (
+        !event.key ||
+        ['currentProfile', 'currentProfileId', 'profileLastUpdated'].includes(event.key)
+      ) {
+        const newProfile = profileManager.getCurrentProfile();
+        if (newProfile) {
           setProfile(newProfile);
-        } catch (error) {
-          console.error('Error parsing profile from storage event:', error);
         }
       }
     };
@@ -79,19 +83,11 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     
     // Also check localStorage periodically (fallback for same-tab updates)
     const checkInterval = setInterval(() => {
-      const storedProfile = localStorage.getItem('currentProfile');
-      const lastUpdated = localStorage.getItem('profileLastUpdated');
+      const storedProfile = profileManager.getCurrentProfile();
       if (storedProfile) {
-        try {
-          const parsed = JSON.parse(storedProfile);
-          // Only update if profile actually changed (check by comparing IDs or timestamps)
-          const currentProfileId = profile?.id || `${profile?.language?.id || 'unknown'}_${(typeof profile?.accent === 'object' ? profile?.accent?.name : profile?.accent)?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
-          const newProfileId = parsed.id || `${parsed.language?.id || 'unknown'}_${(typeof parsed.accent === 'object' ? parsed.accent?.name : parsed.accent)?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
-          if (currentProfileId !== newProfileId) {
-            setProfile(parsed);
-          }
-        } catch (error) {
-          // Ignore parse errors
+        const currentProfileId = profile?.id;
+        if (storedProfile.id && currentProfileId !== storedProfile.id) {
+          setProfile(storedProfile);
         }
       }
     }, 1000); // Check every second
@@ -135,8 +131,12 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   const [audioCapture, setAudioCapture] = useState(null);
   const [audioData, setAudioData] = useState(null);
   const [showWaveform, setShowWaveform] = useState(false);
-  const [timedMode, setTimedMode] = useState(false);
-  const [timeRemaining, setTimeRemaining] = useState(30);
+  const [timedMode, setTimedMode] = useState(!!locationTimedMode);
+  const [timedSettings, setTimedSettings] = useState(locationTimedSettings || null);
+  const [timeRemaining, setTimeRemaining] = useState((locationTimedSettings && locationTimedSettings.timeLimitSeconds) || 30);
+  const [timerActive, setTimerActive] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
+  const [autoStartRecording, setAutoStartRecording] = useState(false);
   const timerRef = useRef(null);
   const audioRef = useRef(null);
   const feedbackAudioRef = useRef(null); // For phoneme feedback TTS audio
@@ -164,6 +164,30 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   const [phonemeFeedback, setPhonemeFeedback] = useState(null); // Store phoneme-level feedback
   const [isLoadingPhonemeFeedback, setIsLoadingPhonemeFeedback] = useState(false);
   const [isPlayingFeedbackTTS, setIsPlayingFeedbackTTS] = useState(false);
+
+  useEffect(() => {
+    if (locationTimedMode) {
+      setTimedMode(true);
+      setTimedSettings(locationTimedSettings || null);
+    }
+  }, [locationTimedMode, locationTimedSettings]);
+
+  const timeLimit = useMemo(
+    () => (timedSettings?.timeLimitSeconds ? Number(timedSettings.timeLimitSeconds) : 30),
+    [timedSettings]
+  );
+
+  useEffect(() => {
+    if (!timerActive) {
+      setTimeRemaining(timeLimit);
+    }
+  }, [timeLimit, timerActive]);
+
+  useEffect(() => {
+    if (timedMode) {
+      setUseFileUpload(false);
+    }
+  }, [timedMode]);
 
   // Load profile settings from localStorage
   useEffect(() => {
@@ -269,12 +293,51 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const timeoutHandledRef = useRef(false);
+
+  const handleTimeExpired = useCallback(() => {
+    if (!timedMode || timeoutHandledRef.current) {
+      return;
+    }
+    timeoutHandledRef.current = true;
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setTimerActive(false);
+    setTimeRemaining(0);
+    setTimedOut(true);
+    setIsProcessing(false);
+    setShowWaveform(false);
+    setAudioData(null);
+    if (isRecording && audioCapture) {
+      try {
+        audioCapture.stopRecording();
+      } catch (error) {
+        console.error('Error stopping recording on timeout:', error);
+      }
+      setIsRecording(false);
+    }
+    setAnalysisResult({
+      timedOut: true,
+      message: 'Time expired before you could respond.',
+    });
+  }, [timedMode, audioCapture, isRecording]);
+
   useEffect(() => {
-    if (timedMode && isRecording) {
+    if (timedMode && timerActive) {
+      timeoutHandledRef.current = false;
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
       timerRef.current = setInterval(() => {
         setTimeRemaining((prev) => {
           if (prev <= 1) {
-              stopRecording();
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            handleTimeExpired();
             return 0;
           }
           return prev - 1;
@@ -283,17 +346,17 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     } else {
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
-      setTimeRemaining(30);
     }
 
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timedMode, isRecording]);
+  }, [timedMode, timerActive, handleTimeExpired]);
 
   // Autoplay audio when phrase changes
   useEffect(() => {
@@ -465,6 +528,15 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
         setIsPlaying(false);
         setHasPlayedOnce(true);
         URL.revokeObjectURL(audioUrl);
+        if (timedMode) {
+          timeoutHandledRef.current = false;
+          setTimedOut(false);
+          setTimeRemaining(timeLimit);
+          setTimerActive(true);
+          if (!useFileUpload) {
+            setAutoStartRecording(true);
+          }
+        }
       };
       
       audio.onerror = (error) => {
@@ -559,9 +631,14 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
 
   const startRecording = () => {
     if (!audioCapture) return;
+    if (timedMode && timedOut) return;
     try {
       audioCapture.startRecording();
       setIsRecording(true);
+      if (timedMode && !timerActive) {
+        timeoutHandledRef.current = false;
+        setTimerActive(true);
+      }
     } catch (error) {
       console.error('Error starting recording:', error);
     }
@@ -572,6 +649,14 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     
     setIsRecording(false);
     setIsProcessing(true);
+    if (timedMode) {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      setTimerActive(false);
+      timeoutHandledRef.current = true;
+    }
 
     try {
       const audioBlob = await audioCapture.stopRecording();
@@ -672,6 +757,13 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     }
   };
 
+  useEffect(() => {
+    if (autoStartRecording) {
+      startRecording();
+      setAutoStartRecording(false);
+    }
+  }, [autoStartRecording]);
+
   const nextPhrase = () => {
     // Stop feedback TTS if playing
     if (feedbackAudioRef.current) {
@@ -704,6 +796,12 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       setReferenceAudioBlob(null);
       setPhonemeFeedback(null);
       setIsPlayingFeedbackTTS(false);
+      setTimedOut(false);
+      setTimerActive(false);
+      timeoutHandledRef.current = false;
+      setTimeRemaining(timeLimit);
+      setAutoStartRecording(false);
+      setIsProcessing(false);
     } else {
       // Practice complete
       navigate('/dashboard', { state: { practiceComplete: true, isCurated } });
@@ -1193,10 +1291,13 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
           {/* Static Content Section - Centered (takes available space, results expand below) */}
           <div className="flex-shrink-0 flex flex-col items-center justify-center relative" style={{ minHeight: '400px', paddingTop: '80px' }}>
             {/* Timer - Absolute positioned at top */}
-            {timedMode && isRecording && (
+            {timedMode && timerActive && (
               <div className="absolute top-0 left-1/2 transform -translate-x-1/2 mb-6 text-center">
-                <div className="inline-block bg-accenta-primary/20 rounded-full px-6 py-2">
+                <div className="inline-block bg-accenta-primary/20 rounded-full px-6 py-2 shadow-lg">
                   <span className="text-accenta-primary text-2xl font-bold">{timeRemaining}s</span>
+                </div>
+                <div className="mt-2 text-sm text-white/80">
+                  {timedSettings?.label || 'Timed practice'} • {timeLimit}s per phrase
                 </div>
               </div>
             )}
@@ -1211,10 +1312,10 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
             </div>
 
             {/* Replay Button - Below phrase */}
-            <div className={`flex justify-center mt-6 transition-opacity duration-300 ${hasPlayedOnce && !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+            <div className={`flex justify-center mt-6 transition-opacity duration-300 ${hasPlayedOnce && !isPlaying && !timerActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
               <button
                 onClick={playPhrase}
-                disabled={isRecording || isPlaying || !hasPlayedOnce}
+                disabled={isRecording || isPlaying || !hasPlayedOnce || timerActive || timedOut}
                 className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -1225,38 +1326,40 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
             </div>
 
             {/* Toggle between Microphone and File Upload */}
-            <div className="flex justify-center gap-4 mt-4 mb-2">
-              <button
-                onClick={() => setUseFileUpload(false)}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  !useFileUpload
-                    ? 'bg-accenta-primary text-white'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-              >
-                🎤 Microphone
-              </button>
-              <button
-                onClick={() => {
-                  setUseFileUpload(true);
-                  fileInputRef.current?.click();
-                }}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  useFileUpload
-                    ? 'bg-accenta-primary text-white'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-              >
-                📁 Upload File
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/*,.mp3,.wav,.m4a,.flac,.webm,.ogg"
-                onChange={handleFileChange}
-                className="hidden"
-              />
-            </div>
+            {!timedMode && (
+              <div className="flex justify-center gap-4 mt-4 mb-2">
+                <button
+                  onClick={() => setUseFileUpload(false)}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    !useFileUpload
+                      ? 'bg-accenta-primary text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  🎤 Microphone
+                </button>
+                <button
+                  onClick={() => {
+                    setUseFileUpload(true);
+                    fileInputRef.current?.click();
+                  }}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    useFileUpload
+                      ? 'bg-accenta-primary text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  📁 Upload File
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="audio/*,.mp3,.wav,.m4a,.flac,.webm,.ogg"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+              </div>
+            )}
 
             {/* Show uploaded file name */}
             {uploadedFile && (
@@ -1373,7 +1476,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
                 {!isRecording ? (
                   <button
                     onClick={startRecording}
-                    disabled={isPlaying || !audioCapture}
+                    disabled={isPlaying || !audioCapture || (timedMode && timedOut)}
                     className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
                   >
                     <svg className="w-8 h-8 text-gray-900" fill="currentColor" viewBox="0 0 20 20">

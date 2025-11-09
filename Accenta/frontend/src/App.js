@@ -14,6 +14,8 @@ import AccentSelection from './components/AccentSelection';
 import Survey from './components/Survey';
 import InitialTest from './components/InitialTest';
 import PracticeTransition from './components/PracticeTransition';
+import FirstPracticeIntro from './components/FirstPracticeIntro';
+import TimedPracticeSetup from './components/TimedPracticeSetup';
 import Dashboard from './components/Dashboard';
 import Profile from './components/Profile';
 import Practice from './components/Practice';
@@ -71,10 +73,26 @@ function App() {
           }
         />
         <Route
+          path="/first-practice-intro"
+          element={
+            <ProtectedRoute>
+              <FirstPracticeIntro />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/practice-transition"
           element={
             <ProtectedRoute>
               <PracticeTransition />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/timed-practice"
+          element={
+            <ProtectedRoute>
+              <TimedPracticeSetup />
             </ProtectedRoute>
           }
         />

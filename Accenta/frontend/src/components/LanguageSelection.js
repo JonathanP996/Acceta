@@ -2,10 +2,12 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LANGUAGES, searchLanguages } from '../data/languages';
 import { authService } from '../services/api';
+import { profileManager } from '../utils/profileManager';
 
 const LanguageSelection = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [hasProfile, setHasProfile] = useState(false);
+  const [profiles, setProfiles] = useState(() => profileManager.readProfiles());
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -19,26 +21,40 @@ const LanguageSelection = () => {
       const hasCompletedTest = localStorage.getItem('hasCompletedInitialTest');
       const hasProfileData = localStorage.getItem('userProfile');
       const hasVisitedDashboard = localStorage.getItem('hasVisitedDashboard');
-      
+      const hasAccentProfiles = profiles.length > 0;
+
       // User has a profile if any of these are true
-      setHasProfile(!!(hasCompletedTest || hasProfileData || hasVisitedDashboard));
+      setHasProfile(!!(hasCompletedTest || hasProfileData || hasVisitedDashboard || hasAccentProfiles));
     }
+  }, [profiles.length]);
+
+  useEffect(() => {
+    const handleProfileChange = () => {
+      setProfiles(profileManager.readProfiles());
+    };
+
+    window.addEventListener('profileChanged', handleProfileChange);
+    window.addEventListener('storage', handleProfileChange);
+
+    return () => {
+      window.removeEventListener('profileChanged', handleProfileChange);
+      window.removeEventListener('storage', handleProfileChange);
+    };
   }, []);
 
   // Get progress for each language (mock data for now, can be enhanced later)
   const getLanguageProgress = (languageId) => {
-    const storedProfile = localStorage.getItem('currentProfile');
-    if (storedProfile) {
-      try {
-        const profile = JSON.parse(storedProfile);
-        if (typeof profile.language === 'object' && profile.language.id === languageId) {
-          return profile.overallScore || 0;
-        }
-      } catch (e) {
-        // Ignore parse errors
-      }
+    const relatedProfiles = profiles.filter(
+      (profile) =>
+        (typeof profile.language === 'object' ? profile.language.id : profile.language) === languageId
+    );
+
+    if (relatedProfiles.length === 0) {
+      return 0;
     }
-    return 0;
+
+    const totalScore = relatedProfiles.reduce((total, profile) => total + (profile.overallScore || 0), 0);
+    return Math.round(totalScore / relatedProfiles.length);
   };
 
   const filteredLanguages = useMemo(() => {

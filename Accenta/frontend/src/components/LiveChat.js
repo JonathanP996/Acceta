@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
 import { chatService, ttsService } from '../services/api';
 import AudioReactiveAvatar from './AudioReactiveAvatar';
+import { profileManager } from '../utils/profileManager';
 
 const LiveChat = () => {
   const location = useLocation();
@@ -10,22 +11,17 @@ const LiveChat = () => {
   const { profile: locationProfile } = location.state || {};
   
   // State for profile that can be updated dynamically
-  const [profile, setProfile] = useState(locationProfile);
+  const [profile, setProfile] = useState(() => locationProfile || profileManager.getCurrentProfile());
   
   // Load profile from localStorage if not provided via location
   useEffect(() => {
     if (!profile) {
-      const storedProfile = localStorage.getItem('currentProfile');
+      const storedProfile = profileManager.getCurrentProfile();
       if (storedProfile) {
-        try {
-          const parsed = JSON.parse(storedProfile);
-          setProfile(parsed);
-        } catch (error) {
-          console.error('Error parsing stored profile:', error);
-        }
+        setProfile(storedProfile);
       }
     }
-  }, []);
+  }, [profile]);
   
   // Listen for profile changes from dropdown
   useEffect(() => {
@@ -39,12 +35,13 @@ const LiveChat = () => {
     };
     
     const handleStorageChange = (event) => {
-      if (event.key === 'currentProfile') {
-        try {
-          const newProfile = JSON.parse(event.newValue);
+      if (
+        !event.key ||
+        ['currentProfile', 'currentProfileId', 'profileLastUpdated'].includes(event.key)
+      ) {
+        const newProfile = profileManager.getCurrentProfile();
+        if (newProfile) {
           setProfile(newProfile);
-        } catch (error) {
-          console.error('Error parsing profile from storage event:', error);
         }
       }
     };
@@ -54,17 +51,11 @@ const LiveChat = () => {
     
     // Also check localStorage periodically (fallback for same-tab updates)
     const checkInterval = setInterval(() => {
-      const storedProfile = localStorage.getItem('currentProfile');
+      const storedProfile = profileManager.getCurrentProfile();
       if (storedProfile) {
-        try {
-          const parsed = JSON.parse(storedProfile);
-          const currentProfileId = profile?.id || `${profile?.language?.id || 'unknown'}_${(typeof profile?.accent === 'object' ? profile?.accent?.name : profile?.accent)?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
-          const newProfileId = parsed.id || `${parsed.language?.id || 'unknown'}_${(typeof parsed.accent === 'object' ? parsed.accent?.name : parsed.accent)?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
-          if (currentProfileId !== newProfileId) {
-            setProfile(parsed);
-          }
-        } catch (error) {
-          // Ignore parse errors
+        const currentProfileId = profile?.id;
+        if (storedProfile.id && currentProfileId !== storedProfile.id) {
+          setProfile(storedProfile);
         }
       }
     }, 1000);

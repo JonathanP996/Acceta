@@ -3,7 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
 import { accentDetectionService, ttsService } from '../services/api';
 import { getTestPrompts } from '../data/languagePrompts';
-import { getSkillLevel, SKILL_LEVELS } from '../data/skills';
+import { getSkillLevel, SKILL_LEVELS, getSkillsForAccent } from '../data/skills';
+import { profileManager } from '../utils/profileManager';
 
 const InitialTest = () => {
   const location = useLocation();
@@ -297,23 +298,48 @@ const InitialTest = () => {
       : 0;
 
     // Calculate skill level from average score
-    const skillRank = getSkillLevel(avgScore);
+  const skillRank = getSkillLevel(avgScore) || SKILL_LEVELS.BEGINNER;
 
     // Mark that user has completed initial test and has a profile
     localStorage.setItem('hasCompletedInitialTest', 'true');
     localStorage.setItem('hasVisitedDashboard', 'true');
 
+  const aggregatedStruggles = Array.from(
+    new Set(
+      testResults
+        .map((result) => result.result?.struggle_areas || [])
+        .flat()
+        .filter(Boolean)
+    )
+  );
+
+  const languageId = typeof language === 'object' ? language.id : language;
+  const accentId = typeof accent === 'object' ? accent.id : accent;
+  const defaultSkills = getSkillsForAccent(languageId, accentId).map((skill) => ({
+    ...skill,
+    score: Math.round(avgScore),
+  }));
+
+  const createdProfile = profileManager.upsertProfile({
+    language,
+    accent,
+    overallScore: avgScore,
+    skillLevel: skillRank,
+    learningReason: location.state?.learningReason || null,
+    totalSessions: 0,
+    practiceTime: 0,
+    struggleAreas: aggregatedStruggles,
+    skills: defaultSkills,
+  });
+
+  profileManager.setCurrentProfile(createdProfile);
+
     // Navigate to practice transition screen
-    navigate('/practice-transition', {
+  navigate('/first-practice-intro', {
       state: {
-        profile: {
-        language: language,
-          accent: accent,
-          overallScore: avgScore,
-          skillLevel: skillRank,
-        },
-        accent: accent,
-        fromInitialTest: true,
+      profile: createdProfile,
+      accent,
+      fromInitialTest: true,
       },
     });
   };

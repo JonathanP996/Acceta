@@ -1,17 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { authService } from '../services/api';
 import { getSkillLevel, getSkillsForAccent, ENGLISH_SKILLS, getProgressPercentage, SKILL_LEVELS } from '../data/skills';
 import { getCoursesForLevel } from '../data/courses';
 import { getLessonPhrases } from '../data/lessonPhrases';
-import { LANGUAGES } from '../data/languages';
+import { profileManager } from '../utils/profileManager';
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [user, setUser] = useState(null);
-  const [profiles, setProfiles] = useState([]);
-  const [currentProfile, setCurrentProfile] = useState(null);
+  const [profiles, setProfiles] = useState(() => profileManager.readProfiles());
+  const [currentProfile, setCurrentProfile] = useState(() => profileManager.getCurrentProfile());
   const [profileSettings, setProfileSettings] = useState({
     nickname: '',
     colorScheme: 'blueOrange',
@@ -250,95 +250,65 @@ const Dashboard = () => {
     window.location.reload();
   };
 
-  useEffect(() => {
-    const currentUser = authService.getCurrentUser();
-    setUser(currentUser);
+  const refreshProfiles = useCallback(() => {
+    const storedProfiles = profileManager.readProfiles();
+    setProfiles(storedProfiles);
+    const activeProfile = profileManager.getCurrentProfile();
 
-    // Mark that user has visited dashboard (indicates they have a profile)
-    localStorage.setItem('hasVisitedDashboard', 'true');
-
-    // Check if we have a new test result from InitialTest
-    if (location.state?.testComplete && location.state?.initialScore !== undefined) {
-      const initialScore = Math.round(location.state.initialScore);
-      // Store the full language object (with id) for language-specific prompts
-      const language = location.state.language || { name: 'Unknown', id: 'english' };
-      // Handle accent - it might be an object with .name or a string
-      const accent = typeof location.state.accent === 'object' 
-        ? (location.state.accent?.name || 'Unknown')
-        : (location.state.accent || 'Unknown');
-      
-      // Initialize skills with scores based on overall score (can be refined later)
-      const skills = ENGLISH_SKILLS.map(skill => ({
-        ...skill,
-        score: Math.max(0, Math.min(100, initialScore + (Math.random() * 20 - 10))), // Slight variation around overall score
-      }));
-      
-      const newProfile = {
-        language: language, // Store full language object with id
-        accent: accent,
-        overallScore: initialScore,
-        skillLevel: getSkillLevel(initialScore),
-        totalSessions: 1,
-        practiceTime: 0, // minutes
-        struggleAreas: location.state.results?.map(r => r.struggleAreas || []).flat().filter((v, i, a) => a.indexOf(v) === i) || [],
-        skills: skills,
-      };
-      
-      // Update profiles list (in production, this would be saved to backend)
-      setProfiles([newProfile]);
-      setCurrentProfile(newProfile);
-      
-      // Store in localStorage for persistence
-      localStorage.setItem('currentProfile', JSON.stringify(newProfile));
+    if (activeProfile) {
+      setCurrentProfile(activeProfile);
       return;
     }
 
-    // Load user profiles (mock data for now)
-    // In production, fetch from backend
-    const storedProfile = localStorage.getItem('currentProfile');
-    if (storedProfile) {
-      try {
-        const parsed = JSON.parse(storedProfile);
-        // Ensure skills are initialized if missing (for older profiles)
-        if (!parsed.skills || parsed.skills.length === 0) {
-          parsed.skills = ENGLISH_SKILLS.map(skill => ({
-            ...skill,
-            score: Math.max(0, Math.min(100, (parsed.overallScore || 50) + (Math.random() * 20 - 10))),
-          }));
-        }
-        setProfiles([parsed]);
-        setCurrentProfile(parsed);
-        return;
-      } catch (e) {
-        console.error('Failed to parse stored profile:', e);
-      }
+    if (storedProfiles.length > 0) {
+      profileManager.setCurrentProfile(storedProfiles[0]);
+      setCurrentProfile(storedProfiles[0]);
+    } else {
+      setCurrentProfile(null);
     }
+  }, []);
 
-    // Initialize skills with mock scores
-    const mockSkills = ENGLISH_SKILLS.map(skill => ({
-      ...skill,
-      score: Math.floor(Math.random() * 30) + 60, // 60-90 range
-    }));
-    
-    const mockProfiles = [
-      {
-        language: 'English',
-        accent: 'American',
-        overallScore: 75,
-        skillLevel: getSkillLevel(75),
-        totalSessions: 12,
-        practiceTime: 180, // minutes
-        struggleAreas: ['r', 'th', 'v'],
-        skills: mockSkills,
-      },
-    ];
-    setProfiles(mockProfiles);
-    
-    // Set the first profile as current (or most recent)
-    if (mockProfiles.length > 0) {
-      setCurrentProfile(mockProfiles[0]);
+  useEffect(() => {
+    const currentUser = authService.getCurrentUser();
+    setUser(currentUser);
+    localStorage.setItem('hasVisitedDashboard', 'true');
+    refreshProfiles();
+
+    if (location.state?.profileId) {
+      const updatedProfile = profileManager.getProfileById(location.state.profileId);
+      if (updatedProfile) {
+        profileManager.setCurrentProfile(updatedProfile);
+        setCurrentProfile(updatedProfile);
+      }
+      navigate(location.pathname, { replace: true });
     }
-  }, [location.state]);
+  }, [refreshProfiles, location.state, navigate, location.pathname]);
+
+  useEffect(() => {
+    const handleProfileChange = (event) => {
+      setCurrentProfile(event.detail);
+      setProfiles(profileManager.readProfiles());
+    };
+
+    const handleStorageChange = (event) => {
+      if (
+        !event.key ||
+        ['accentProfiles', 'currentProfile', 'currentProfileId', 'profileLastUpdated'].includes(
+          event.key
+        )
+      ) {
+        refreshProfiles();
+      }
+    };
+
+    window.addEventListener('profileChanged', handleProfileChange);
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('profileChanged', handleProfileChange);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [refreshProfiles]);
 
   const handleLogout = () => {
     authService.logout();
@@ -369,87 +339,13 @@ const Dashboard = () => {
     });
   };
 
-  const handleSwitchAccent = (profile) => {
-    setCurrentProfile(profile);
-    localStorage.setItem('currentProfile', JSON.stringify(profile));
-    
-    // Dispatch a custom event to notify other components of profile change
-    window.dispatchEvent(new CustomEvent('profileChanged', { detail: profile }));
-    
-    // Also update a timestamp to force re-renders in components that check localStorage
-    localStorage.setItem('profileLastUpdated', Date.now().toString());
-    
-    console.log('✅ Profile switched to:', {
-      language: typeof profile.language === 'object' ? profile.language?.name : profile.language,
-      accent: typeof profile.accent === 'object' ? profile.accent?.name : profile.accent
-    });
-  };
-
-  // Get progress for a language
-  const getLanguageProgress = (languageId) => {
-    // Check if we have a profile for this language
-    const profileForLanguage = profiles.find(p => {
-      const profileLangId = typeof p.language === 'object' ? p.language?.id : p.language;
-      return profileLangId === languageId;
-    });
-    
-    if (profileForLanguage) {
-      return profileForLanguage.overallScore || 0;
+  const handleProfileSelect = (profileId) => {
+    const selectedProfile = profiles.find((profileItem) => profileItem.id === profileId);
+    if (selectedProfile) {
+      profileManager.setCurrentProfile(selectedProfile);
+      setCurrentProfile(selectedProfile);
+      setIsLanguageDropdownOpen(false);
     }
-    
-    // Check current profile
-    if (currentProfile) {
-      const currentLangId = typeof currentProfile.language === 'object' ? currentProfile.language?.id : currentProfile.language;
-      if (currentLangId === languageId) {
-        return currentProfile.overallScore || 0;
-      }
-    }
-    
-    return 0;
-  };
-
-  // Handle language selection from dropdown
-  const handleLanguageSelect = (language) => {
-    // Check if we already have a profile for this language
-    const existingProfile = profiles.find(p => {
-      const profileLangId = typeof p.language === 'object' ? p.language?.id : p.language;
-      return profileLangId === language.id;
-    });
-    
-    if (existingProfile) {
-      // Switch to existing profile
-      handleSwitchAccent(existingProfile);
-    } else {
-      // Create a new profile for this language with default accent
-      const defaultAccent = language.accents && language.accents.length > 0 
-        ? language.accents[0] 
-        : { id: 'standard', name: 'Standard' };
-      
-      const newProfile = {
-        id: `${language.id}_${defaultAccent.id}`,
-        language: { name: language.name, id: language.id },
-        accent: defaultAccent.name,
-        overallScore: 0,
-        skillLevel: getSkillLevel(0),
-        totalSessions: 0,
-        practiceTime: 0,
-        struggleAreas: [],
-        lastPracticed: new Date(),
-        skills: ENGLISH_SKILLS.map(skill => ({
-          ...skill,
-          score: 0,
-        })),
-      };
-      
-      // Add to profiles list
-      const updatedProfiles = [...profiles, newProfile];
-      setProfiles(updatedProfiles);
-      
-      // Switch to new profile
-      handleSwitchAccent(newProfile);
-    }
-    
-    setIsLanguageDropdownOpen(false);
   };
 
   // Set selected skill level when profile loads
@@ -457,69 +353,6 @@ const Dashboard = () => {
     if (currentProfile?.skillLevel) {
       setSelectedSkillLevel(currentProfile.skillLevel);
     }
-  }, [currentProfile]);
-
-  // Load all user profiles for accents list
-  useEffect(() => {
-    const loadAllProfiles = () => {
-      const storedProfile = localStorage.getItem('currentProfile');
-      const allProfiles = [];
-      
-      if (storedProfile) {
-        try {
-          const profile = JSON.parse(storedProfile);
-          profile.lastPracticed = new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000);
-          profile.id = `${profile.language?.id || 'english'}_${(typeof profile.accent === 'object' ? profile.accent?.name : profile.accent)?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
-          allProfiles.push(profile);
-        } catch (error) {
-          console.error('Error parsing stored profile:', error);
-        }
-      }
-
-      // Add mock profiles for demonstration
-      const mockProfiles = [
-        {
-          id: 'english_british',
-          language: { name: 'English', id: 'english' },
-          accent: 'British',
-          overallScore: 82,
-          skillLevel: getSkillLevel(82),
-          totalSessions: 15,
-          practiceTime: 240,
-          struggleAreas: ['r', 'a'],
-          lastPracticed: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-          skills: ENGLISH_SKILLS.map(skill => ({
-            ...skill,
-            score: Math.floor(Math.random() * 30) + 70,
-          })),
-        },
-        {
-          id: 'english_american',
-          language: { name: 'English', id: 'english' },
-          accent: 'American',
-          overallScore: 75,
-          skillLevel: getSkillLevel(75),
-          totalSessions: 12,
-          practiceTime: 180,
-          struggleAreas: ['r', 'th', 'v'],
-          lastPracticed: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-          skills: ENGLISH_SKILLS.map(skill => ({
-            ...skill,
-            score: Math.floor(Math.random() * 40) + 60,
-          })),
-        },
-      ];
-
-      const combined = [...allProfiles, ...mockProfiles];
-      const unique = combined.filter((profile, index, self) =>
-        index === self.findIndex((p) => p.id === profile.id)
-      );
-      unique.sort((a, b) => b.lastPracticed - a.lastPracticed);
-      
-      setProfiles(unique);
-    };
-
-    loadAllProfiles();
   }, [currentProfile]);
 
   // Close dropdown when clicking outside
@@ -542,7 +375,7 @@ const Dashboard = () => {
   return (
     <div className={`min-h-screen bg-gradient-to-br ${currentColorScheme.primary}`}>
       {/* Header */}
-      <header className="bg-white/10 backdrop-blur-md border-b border-white/20">
+      <header className="relative z-40 bg-white/10 backdrop-blur-md border-b border-white/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex justify-between items-center">
             <div 
@@ -554,11 +387,11 @@ const Dashboard = () => {
             <div className="flex items-center gap-4">
               {/* Language Dropdown */}
               <div className="relative" ref={languageDropdownRef}>
-                  <button
+                <button
                   onClick={() => setIsLanguageDropdownOpen(!isLanguageDropdownOpen)}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-white/20 bg-white/10 hover:bg-white/20 text-white/90 hover:text-white transition-colors font-medium"
-                  >
-                    <span>
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-white/20 bg-white/10 hover:bg-white/20 text-white/90 hover:text-white transition-colors font-medium"
+                >
+                  <span>
                     {currentProfile ? (
                       <>
                         {typeof currentProfile.language === 'object' 
@@ -568,74 +401,96 @@ const Dashboard = () => {
                     ) : (
                       'Select Language'
                     )}
-                    </span>
-                    <svg 
+                  </span>
+                  <svg 
                     className={`w-4 h-4 transition-transform ${isLanguageDropdownOpen ? 'rotate-180' : ''}`}
-                      fill="none" 
-                      stroke="currentColor" 
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
                 {isLanguageDropdownOpen && (
-                  <div className={`absolute right-0 mt-2 w-72 bg-white rounded-lg shadow-xl border-2 ${currentColorScheme.border} z-50 max-h-96 overflow-y-auto`}>
-                      <div className="p-2">
-                      {LANGUAGES.map((language) => {
-                        const progress = getLanguageProgress(language.id);
-                        const isCurrent = currentProfile && (
-                          typeof currentProfile.language === 'object' 
-                            ? currentProfile.language?.id === language.id
-                            : currentProfile.language === language.id
-                        );
-                          
+                  <div className={`absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl border-2 ${currentColorScheme.border} z-50 max-h-96 overflow-y-auto`}>
+                    {profiles.length > 0 ? (
+                      <div className="p-2 space-y-2">
+                        {profiles.map((profileItem) => {
+                          const isCurrent = currentProfile?.id === profileItem.id;
+                          const accentName =
+                            typeof profileItem.accent === 'object'
+                              ? profileItem.accent.name
+                              : profileItem.accent;
+                          const languageName =
+                            typeof profileItem.language === 'object'
+                              ? profileItem.language.name
+                              : profileItem.language;
+                          const progressValue = profileItem.overallScore || 0;
                           return (
                             <button
-                            key={language.id}
-                            onClick={() => handleLanguageSelect(language)}
+                              key={profileItem.id}
+                              onClick={() => handleProfileSelect(profileItem.id)}
                               className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${
-                                isCurrent 
-                                  ? `${currentColorScheme.bgColor} ${currentColorScheme.textColor} font-semibold` 
+                                isCurrent
+                                  ? `${currentColorScheme.bgColor} ${currentColorScheme.textColor} font-semibold`
                                   : 'hover:bg-gray-100 text-gray-700'
                               }`}
                             >
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-3">
-                                <span className="text-2xl">{language.flag}</span>
+                              <div className="flex items-start justify-between gap-3">
                                 <div>
-                                  <p className="font-medium">{language.name}</p>
-                                </div>
+                                  <p className="text-sm font-medium text-gray-500">{languageName}</p>
+                                  <p className="text-lg font-semibold text-gray-900">{accentName}</p>
+                                  {profileItem.skillLevel && (
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      Skill level: {profileItem.skillLevel.name}
+                                    </p>
+                                  )}
                                 </div>
                                 {isCurrent && (
-                                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                  <svg className="w-5 h-5 text-gray-700" fill="currentColor" viewBox="0 0 20 20">
+                                    <path
+                                      fillRule="evenodd"
+                                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                      clipRule="evenodd"
+                                    />
                                   </svg>
                                 )}
                               </div>
-                            <div className="ml-11">
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-xs text-gray-500">Progress</span>
-                                <span className="text-sm font-semibold text-gray-900">{progress}%</span>
+                              <div className="mt-3">
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-xs text-gray-500">Progress</span>
+                                  <span className="text-sm font-semibold text-gray-900">
+                                    {Math.round(progressValue)}%
+                                  </span>
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                  <div
+                                    className="h-2 bg-gradient-to-r from-blue-500 to-orange-500 rounded-full transition-all duration-500"
+                                    style={{ width: `${Math.min(Math.max(progressValue, 0), 100)}%` }}
+                                  />
+                                </div>
                               </div>
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div
-                                  className={`h-2 rounded-full transition-all duration-500 ${
-                                    progress >= 80 ? 'bg-green-500' :
-                                    progress >= 60 ? 'bg-yellow-500' :
-                                    progress >= 40 ? 'bg-orange-500' :
-                                    'bg-red-500'
-                                  }`}
-                                  style={{ width: `${progress}%` }}
-                                />
-                              </div>
-                            </div>
                             </button>
                           );
                         })}
                       </div>
-                    </div>
-                  )}
-                </div>
+                    ) : (
+                      <div className="p-4 text-center text-gray-600">
+                        <p className="text-sm mb-3">No accent profiles yet.</p>
+                        <button
+                          onClick={() => {
+                            setIsLanguageDropdownOpen(false);
+                            handleStartNew();
+                          }}
+                          className={`px-4 py-2 ${currentColorScheme.button} text-white rounded-lg font-semibold transition-colors`}
+                        >
+                          Create New Profile
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
               <button
                 onClick={handleStartNew}
                 className="text-white/90 hover:text-white font-medium transition-colors px-4 py-2 flex items-center gap-2"
@@ -756,7 +611,7 @@ const Dashboard = () => {
                 >
                   {Object.values(SKILL_LEVELS).map((level) => (
                     <option key={level.name} value={level.name}>
-                      {level.name} {level.name === 'Beginner' ? 'A1' : level.name === 'Intermediate' ? 'B1' : level.name === 'Adept' ? 'B2' : level.name === 'Pro' ? 'C1' : 'C2'}
+                      {level.name}
                     </option>
                   ))}
                 </select>
@@ -865,58 +720,58 @@ const Dashboard = () => {
 
         {/* Practice Section */}
         {currentProfile && activeSection === 'practice' && (
-          <div className="bg-white rounded-2xl shadow-xl p-8">
+          <div className="rounded-2xl border border-white/20 backdrop-blur-sm bg-white/5 p-8">
             {/* Practice Types */}
-            <div className="space-y-6">
-              {/* Live Chat */}
+            <div className="grid gap-6 md:grid-cols-3">
+              {/* Wally */}
               <div
                 onClick={() => navigate('/live-chat', { state: { profile: currentProfile } })}
-                className="border-2 border-gray-200 rounded-xl p-6 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
+                className="bg-white border-2 border-gray-200 rounded-xl p-6 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer h-full flex flex-col"
               >
-                <div className="flex items-center gap-6">
+                <div className="flex items-center gap-6 flex-1">
                   <div className="text-5xl">💬</div>
                   <div className="flex-1">
-                    <h3 className="text-2xl font-bold text-gray-900 mb-2">Live Chat</h3>
+                    <h3 className="text-2xl font-bold text-gray-900 mb-2">Wally</h3>
                     <p className="text-gray-600">Have a natural conversation with Wally, your friendly chat buddy</p>
                   </div>
-                  <button className={`px-6 py-3 ${currentColorScheme.button} text-white rounded-lg font-semibold hover:shadow-lg transition-all`}>
-                    Start
-                  </button>
                 </div>
+                <button className={`mt-6 px-6 py-3 ${currentColorScheme.button} text-white rounded-lg font-semibold hover:shadow-lg transition-all`}>
+                  Start
+                </button>
               </div>
 
               {/* Call and Response */}
               <div
                 onClick={() => navigate('/practice', { state: { profile: currentProfile } })}
-                className="border-2 border-gray-200 rounded-xl p-6 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
+                className="bg-white border-2 border-gray-200 rounded-xl p-6 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer h-full flex flex-col"
               >
-                <div className="flex items-center gap-6">
+                <div className="flex items-center gap-6 flex-1">
                   <div className="text-5xl">🎤</div>
                   <div className="flex-1">
                     <h3 className="text-2xl font-bold text-gray-900 mb-2">Call and Response</h3>
                     <p className="text-gray-600">Practice phrases with instant feedback and detailed analysis</p>
                   </div>
-                  <button className={`px-6 py-3 ${currentColorScheme.button} text-white rounded-lg font-semibold hover:shadow-lg transition-all`}>
-                    Start
-                  </button>
                 </div>
+                <button className={`mt-6 px-6 py-3 ${currentColorScheme.button} text-white rounded-lg font-semibold hover:shadow-lg transition-all`}>
+                  Start
+                </button>
               </div>
 
               {/* Timed Practice */}
               <div
-                onClick={() => navigate('/practice', { state: { profile: currentProfile, timedMode: true } })}
-                className="border-2 border-gray-200 rounded-xl p-6 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
+                onClick={() => navigate('/timed-practice', { state: { profile: currentProfile } })}
+                className="bg-white border-2 border-gray-200 rounded-xl p-6 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer h-full flex flex-col"
               >
-                <div className="flex items-center gap-6">
+                <div className="flex items-center gap-6 flex-1">
                   <div className="text-5xl">⏱️</div>
                   <div className="flex-1">
                     <h3 className="text-2xl font-bold text-gray-900 mb-2">Timed Practice</h3>
                     <p className="text-gray-600">Challenge yourself with time-limited sessions to build fluency</p>
                   </div>
-                  <button className={`px-6 py-3 ${currentColorScheme.button} text-white rounded-lg font-semibold hover:shadow-lg transition-all`}>
-                    Start
-                  </button>
                 </div>
+                <button className={`mt-6 px-6 py-3 ${currentColorScheme.button} text-white rounded-lg font-semibold hover:shadow-lg transition-all`}>
+                  Start
+                </button>
               </div>
             </div>
           </div>
