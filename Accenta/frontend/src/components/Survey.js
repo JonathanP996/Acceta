@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { authService, getUserStorageKey } from '../services/api';
+import { authService, getUserStorageKey, profileService } from '../services/api';
 import { SKILL_LEVELS } from '../data/skills';
 
 const Survey = () => {
@@ -85,15 +85,32 @@ const Survey = () => {
 
   const handleSkillLevelSelect = (skillLevel) => {
     setSelectedSkillLevel(skillLevel);
+    const userEmail = user?.email;
+    const profileId = profileService.generateProfileId(language, accent);
+
+    if (userEmail) {
+      const overallScore = (skillLevel.min + skillLevel.max) / 2;
+      const profile = {
+        profileId,
+        language,
+        accent,
+        overallScore,
+        skillLevel,
+        totalSessions: 0,
+        practiceTime: 0,
+        struggleAreas: [],
+        createdAt: new Date().toISOString(),
+        lastPracticed: Date.now(),
+      };
+
+      profileService.upsertProfile(profile, userEmail);
+      profileService.setSelectedProfileId(profileId, userEmail);
+    }
+
     // Navigate to practice transition screen
     navigate('/practice-transition', {
       state: {
-        profile: {
-          language: language,
-          accent: accent,
-          overallScore: (skillLevel.min + skillLevel.max) / 2, // Use midpoint of skill level range
-          skillLevel: skillLevel,
-        },
+        profileId,
         accent: accent,
         fromSurvey: true,
         learningReason: selectedReason,

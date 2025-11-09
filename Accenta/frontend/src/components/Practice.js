@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
 import WaveformVisualization from './WaveformVisualization';
-import { ttsService, analysisService, authService, getUserStorageKey } from '../services/api';
+import { ttsService, analysisService, authService, getUserStorageKey, profileService } from '../services/api';
 import { getPracticePhrases } from '../data/languagePrompts';
 
 // Default practice phrases (fallback)
@@ -32,9 +32,27 @@ export const PRACTICE_PHRASES = [
 const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCurated }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { profile: locationProfile, fromInitialTest, fromSurvey, customPhrases: locationCustomPhrases, timedMode: locationTimedMode, showDifficultySelection: locationShowDifficultySelection, lessonId, lessonTitle } = location.state || {};
-  const profile = propProfile || locationProfile;
-  
+  const { profile: locationProfile, profileId: locationProfileId, fromInitialTest, fromSurvey, customPhrases: locationCustomPhrases, timedMode: locationTimedMode, showDifficultySelection: locationShowDifficultySelection, lessonId, lessonTitle } = location.state || {};
+
+  const currentUser = authService.getCurrentUser();
+  const email = currentUser?.email;
+  const storedProfiles = email ? profileService.loadProfiles(email) : [];
+  const fallbackSelectedId = email ? profileService.getSelectedProfileId(email) : null;
+  const resolvedProfileId = propProfile?.profileId || locationProfileId || locationProfile?.profileId || fallbackSelectedId;
+  const resolvedProfile = propProfile
+    || locationProfile
+    || (resolvedProfileId ? storedProfiles.find((p) => p.profileId === resolvedProfileId) : null)
+    || storedProfiles[0]
+    || null;
+
+  const profile = resolvedProfile;
+
+  useEffect(() => {
+    if (profile?.profileId && email) {
+      profileService.setSelectedProfileId(profile.profileId, email);
+    }
+  }, [profile, email]);
+
   // Difficulty levels with time limits (in seconds)
   const DIFFICULTY_LEVELS = {
     easy: { name: 'Easy', time: 30, color: 'green' },
@@ -688,20 +706,20 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       setHasPlayedOnce(false);
     } else {
       // Practice complete
-      // For first practice, pass the profile with skillLevel to Dashboard
-      if (isFirstPractice && profile) {
-        navigate('/dashboard', { 
-          state: { 
-            practiceComplete: true, 
-            isCurated,
-            profile: profile, // Pass profile with skillLevel
-            fromSurvey: fromSurvey,
-            fromInitialTest: fromInitialTest,
-          } 
-        });
-      } else {
-        navigate('/dashboard', { state: { practiceComplete: true, isCurated } });
+      if (profile && currentUser?.email) {
+        try {
+          const updatedProfile = {
+            ...profile,
+            totalSessions: (profile.totalSessions || 0) + 1,
+            lastPracticed: Date.now(),
+          };
+          profileService.upsertProfile(updatedProfile, currentUser.email);
+          profileService.setSelectedProfileId(updatedProfile.profileId, currentUser.email);
+        } catch (error) {
+          console.error('Error updating profile after practice:', error);
+        }
       }
+      navigate('/dashboard', { state: { practiceComplete: true, isCurated, selectedProfileId: profile?.profileId } });
     }
   };
 
@@ -839,7 +857,24 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     );
   }
 
-  return (
+  if (!profile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 via-cyan-800 to-orange-800">
+        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl px-10 py-8 text-center text-white">
+          <p className="text-lg font-semibold">No accent profile selected yet.</p>
+          <p className="text-sm text-white/70 mt-2">Please choose a language and accent to begin practicing.</p>
+          <button
+            onClick={() => navigate('/language-selection')}
+            className="mt-6 px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-blue-100 transition-colors"
+          >
+            Go to Language Selection
+          </button>
+        </div>
+      </div>
+    );
+  }
+ 
+   return (
     <div className={`min-h-screen bg-gradient-to-br ${currentColorScheme.backgroundGradient} flex flex-col opacity-90`}>
       {/* Progress Bar at Top */}
       <div className={`w-full px-4 pt-4 pb-2 transition-all duration-700 ${

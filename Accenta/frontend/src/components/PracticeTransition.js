@@ -1,14 +1,39 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { authService, profileService } from '../services/api';
 
 const PracticeTransition = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { profile, accent, fromInitialTest, fromSurvey } = location.state || {};
+  const { profile: stateProfile, profileId: stateProfileId, accent, fromInitialTest, fromSurvey } = location.state || {};
+  const [profile, setProfile] = useState(stateProfile || null);
   const [hasStarted, setHasStarted] = useState(false);
   const [isRevving, setIsRevving] = useState(true);
   const [isDriving, setIsDriving] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
+
+  useEffect(() => {
+    if (profile) return;
+
+    const user = authService.getCurrentUser();
+    if (!user?.email) return;
+
+    const profiles = profileService.loadProfiles(user.email);
+    const selectedId = stateProfileId || profileService.getSelectedProfileId(user.email);
+
+    if (selectedId) {
+      const found = profiles.find((p) => p.profileId === selectedId);
+      if (found) {
+        setProfile(found);
+        return;
+      }
+    }
+
+    if (!stateProfileId && profiles.length) {
+      setProfile(profiles[0]);
+      profileService.setSelectedProfileId(profiles[0].profileId, user.email);
+    }
+  }, [profile, stateProfileId]);
 
   useEffect(() => {
     if (!hasStarted) return;
@@ -29,7 +54,7 @@ const PracticeTransition = () => {
     const navigateTimer = setTimeout(() => {
       navigate('/practice', {
         state: {
-          profile: profile,
+          profileId: profile?.profileId || stateProfileId,
           accent: accent,
           fromInitialTest: fromInitialTest,
           fromSurvey: fromSurvey,

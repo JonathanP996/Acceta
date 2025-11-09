@@ -5,6 +5,11 @@
 import axios from 'axios';
 import API_BASE_URL, { API_ENDPOINTS } from '../config/api';
 
+const sanitizeId = (value, fallback = 'unknown') => {
+  if (!value) return fallback;
+  return String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+};
+
 // Create axios instance
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -116,6 +121,75 @@ export const getUserStorageKey = (key, email) => {
     email = currentUser?.email;
   }
   return email ? `${key}_${email}` : key;
+};
+
+const getProfilesStorageKey = (email) => getUserStorageKey('profiles', email);
+const getSelectedProfileStorageKey = (email) => getUserStorageKey('selectedProfileId', email);
+
+export const profileService = {
+  generateProfileId(language, accent) {
+    const languageId = language?.id || sanitizeId(language?.name);
+    const accentId = accent?.id || sanitizeId(accent?.name || accent);
+    return `${languageId || 'language'}__${accentId || 'accent'}`;
+  },
+
+  loadProfiles(email) {
+    const key = getProfilesStorageKey(email);
+    const stored = localStorage.getItem(key);
+    if (!stored) return [];
+    try {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+      return [];
+    } catch (error) {
+      console.error('profileService.loadProfiles parse error:', error);
+      return [];
+    }
+  },
+
+  saveProfiles(profiles, email) {
+    const key = getProfilesStorageKey(email);
+    localStorage.setItem(key, JSON.stringify(profiles));
+  },
+
+  getSelectedProfileId(email) {
+    const key = getSelectedProfileStorageKey(email);
+    return localStorage.getItem(key);
+  },
+
+  setSelectedProfileId(profileId, email) {
+    const key = getSelectedProfileStorageKey(email);
+    if (profileId) {
+      localStorage.setItem(key, profileId);
+    } else {
+      localStorage.removeItem(key);
+    }
+  },
+
+  findProfile(languageId, accentId, email) {
+    if (!languageId || !accentId) return null;
+    const profiles = profileService.loadProfiles(email);
+    return profiles.find((profile) => {
+      const profileLanguageId = profile.language?.id || sanitizeId(profile.language?.name);
+      const profileAccentId = profile.accent?.id || sanitizeId(profile.accent?.name || profile.accent);
+      return profileLanguageId === languageId && profileAccentId === accentId;
+    }) || null;
+  },
+
+  upsertProfile(profile, email) {
+    if (!profile) return null;
+    const profiles = profileService.loadProfiles(email);
+    const index = profiles.findIndex((p) => p.profileId === profile.profileId);
+    if (index >= 0) {
+      profiles[index] = { ...profiles[index], ...profile };
+    } else {
+      profiles.push(profile);
+    }
+    profileService.saveProfiles(profiles, email);
+    return profile;
+  },
 };
 
 // Analysis services

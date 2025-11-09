@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LANGUAGES, searchLanguages } from '../data/languages';
-import { authService, getUserStorageKey } from '../services/api';
+import { authService, profileService } from '../services/api';
 
 const LanguageSelection = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -12,12 +12,8 @@ const LanguageSelection = () => {
     // Check if user has a profile by checking email-specific localStorage
     const user = authService.getCurrentUser();
     if (user?.email) {
-      // Check for email-specific profile data
-      const profileStorageKey = getUserStorageKey('currentProfile', user.email);
-      const storedProfile = localStorage.getItem(profileStorageKey);
-      
-      // User has a profile if they have stored profile data
-      setHasProfile(!!storedProfile);
+      const profiles = profileService.loadProfiles(user.email);
+      setHasProfile(Array.isArray(profiles) && profiles.length > 0);
     } else {
       setHasProfile(false);
     }
@@ -28,19 +24,18 @@ const LanguageSelection = () => {
     const user = authService.getCurrentUser();
     if (!user?.email) return 0;
     
-    const profileStorageKey = getUserStorageKey('currentProfile', user.email);
-    const storedProfile = localStorage.getItem(profileStorageKey);
-    if (storedProfile) {
-      try {
-        const profile = JSON.parse(storedProfile);
-        if (typeof profile.language === 'object' && profile.language.id === languageId) {
-          return profile.overallScore || 0;
-        }
-      } catch (e) {
-        // Ignore parse errors
-      }
-    }
-    return 0;
+    const profiles = profileService.loadProfiles(user.email);
+    if (!profiles.length) return 0;
+
+    const matching = profiles.filter((profile) => {
+      const profileLanguageId = profile.language?.id;
+      return profileLanguageId === languageId;
+    });
+
+    if (!matching.length) return 0;
+
+    const averageScore = matching.reduce((sum, profile) => sum + (profile.overallScore || 0), 0) / matching.length;
+    return Math.round(averageScore);
   };
 
   const filteredLanguages = useMemo(() => {

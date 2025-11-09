@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { authService, getUserStorageKey } from '../services/api';
-import { getSkillLevel, getProgressPercentage, ENGLISH_SKILLS } from '../data/skills';
+import { authService, getUserStorageKey, profileService } from '../services/api';
+import { getSkillLevel, getProgressPercentage, ENGLISH_SKILLS, SKILL_LEVELS } from '../data/skills';
 
 const Profile = () => {
   const navigate = useNavigate();
@@ -190,99 +190,45 @@ const Profile = () => {
   useEffect(() => {
     const currentUser = authService.getCurrentUser();
     setUser(currentUser);
+    if (!currentUser?.email) {
+      setProfiles([]);
+      setCurrentProfile(null);
+      return;
+    }
 
-    // Load all profiles from localStorage (email-specific)
-    // In production, this would fetch from backend
-    const loadProfiles = () => {
-      const profileStorageKey = getUserStorageKey('currentProfile', currentUser?.email);
-      const storedProfile = localStorage.getItem(profileStorageKey);
-      const allProfiles = [];
-      
-      if (storedProfile) {
-        try {
-          const profile = JSON.parse(storedProfile);
-          // Add lastPracticed timestamp (mock data - in production this comes from backend)
-          profile.lastPracticed = new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000);
-          const accentName = typeof profile.accent === 'object' ? profile.accent?.name : profile.accent;
-          profile.id = `${profile.language?.id || 'english'}_${accentName?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`;
-          
-          // Ensure skillLevel is set if missing
-          if (!profile.skillLevel && profile.overallScore !== undefined) {
-            profile.skillLevel = getSkillLevel(profile.overallScore);
-          }
-          
-          allProfiles.push(profile);
-        } catch (error) {
-          console.error('Error parsing stored profile:', error);
-        }
+    const email = currentUser.email;
+    const storedProfiles = profileService.loadProfiles(email).map((profile) => {
+      const profileId = profile.profileId || profileService.generateProfileId(profile.language, profile.accent);
+      let skillLevel = profile.skillLevel;
+      if (skillLevel && typeof skillLevel === 'string') {
+        skillLevel = Object.values(SKILL_LEVELS).find((level) => level.name === skillLevel) || getSkillLevel(profile.overallScore || 0);
+      } else if (!skillLevel) {
+        skillLevel = getSkillLevel(profile.overallScore || 0);
       }
 
-      // Add mock profiles for demonstration
-      const mockProfiles = [
-        {
-          id: 'english_british',
-          language: { name: 'English', id: 'english' },
-          accent: 'British',
-          overallScore: 82,
-          skillLevel: getSkillLevel(82),
-          totalSessions: 15,
-          practiceTime: 240,
-          struggleAreas: ['r', 'a'],
-          lastPracticed: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-          skills: ENGLISH_SKILLS.map(skill => ({
+      const skills = profile.skills && profile.skills.length
+        ? profile.skills
+        : ENGLISH_SKILLS.map((skill) => ({
             ...skill,
-            score: Math.floor(Math.random() * 30) + 70, // 70-100
-          })),
-        },
-        {
-          id: 'english_american',
-          language: { name: 'English', id: 'english' },
-          accent: 'American',
-          overallScore: 75,
-          skillLevel: getSkillLevel(75),
-          totalSessions: 12,
-          practiceTime: 180,
-          struggleAreas: ['r', 'th', 'v'],
-          lastPracticed: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // 5 days ago
-          skills: ENGLISH_SKILLS.map(skill => ({
-            ...skill,
-            score: Math.floor(Math.random() * 40) + 60, // 60-100
-          })),
-        },
-        {
-          id: 'spanish_castilian',
-          language: { name: 'Spanish', id: 'spanish' },
-          accent: 'Castilian',
-          overallScore: 68,
-          skillLevel: getSkillLevel(68),
-          totalSessions: 8,
-          practiceTime: 120,
-          struggleAreas: ['rr', 'j'],
-          lastPracticed: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000), // 1 day ago
-          skills: ENGLISH_SKILLS.map(skill => ({
-            ...skill,
-            score: Math.floor(Math.random() * 50) + 50, // 50-100
-          })),
-        },
-      ];
+            score: Math.max(0, Math.min(100, (profile.overallScore || 50) + (Math.random() * 20 - 10)))
+          }));
 
-      // Combine stored and mock profiles, remove duplicates
-      const combined = [...allProfiles, ...mockProfiles];
-      const unique = combined.filter((profile, index, self) =>
-        index === self.findIndex((p) => p.id === profile.id)
-      );
+      return {
+        ...profile,
+        profileId,
+        skillLevel,
+        skills,
+        overallScore: profile.overallScore ?? 0,
+        totalSessions: profile.totalSessions ?? 0,
+        practiceTime: profile.practiceTime ?? 0,
+        struggleAreas: profile.struggleAreas ?? [],
+        lastPracticed: profile.lastPracticed || Date.now(),
+      };
+    });
 
-      // Sort by lastPracticed (most recent first)
-      unique.sort((a, b) => b.lastPracticed - a.lastPracticed);
-      
-      setProfiles(unique);
-      // Set the first profile as current (most recent)
-      if (unique.length > 0) {
-        setCurrentProfile(unique[0]);
-      }
-    };
-
-    loadProfiles();
+    storedProfiles.sort((a, b) => (b.lastPracticed || 0) - (a.lastPracticed || 0));
+    setProfiles(storedProfiles);
+    setCurrentProfile(storedProfiles[0] || null);
   }, []);
 
   if (!user) {
@@ -419,7 +365,7 @@ const Profile = () => {
           ) : (
             <div className="space-y-4">
               {profiles.map((profile, index) => {
-                const isExpanded = expandedAccents.has(profile.id);
+                const isExpanded = expandedAccents.has(profile.profileId);
                 const languageName = typeof profile.language === 'object' ? profile.language.name : profile.language;
                 const accentName = typeof profile.accent === 'object' ? profile.accent.name : profile.accent;
                 
@@ -434,16 +380,16 @@ const Profile = () => {
 
                 return (
                   <div
-                    key={profile.id}
-                    id={`accent-${profile.id}`}
-                    ref={(el) => (sectionRefs.current[`accent-${profile.id}`] = el)}
+                    key={profile.profileId}
+                    id={`accent-${profile.profileId}`}
+                    ref={(el) => (sectionRefs.current[`accent-${profile.profileId}`] = el)}
                     className={`bg-white/90 backdrop-blur-sm rounded-2xl shadow-lg border ${currentColorScheme.border} overflow-hidden transition-all duration-300 ${
                       isExpanded ? 'shadow-xl' : 'hover:shadow-xl'
                     }`}
                   >
                     {/* Collapsed Header - Always Visible */}
                     <button
-                      onClick={() => toggleAccent(profile.id)}
+                      onClick={() => toggleAccent(profile.profileId)}
                       className={`w-full p-6 flex items-center justify-between transition-colors ${
                         profileSettings.colorScheme === 'pink' ? 'hover:bg-pink-50/50' :
                         profileSettings.colorScheme === 'purple' ? 'hover:bg-purple-50/50' :

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AudioCapture from '../utils/audioCapture';
-import { analysisService, ttsService, authService, getUserStorageKey } from '../services/api';
+import { analysisService, ttsService, authService, getUserStorageKey, profileService } from '../services/api';
 import { getTestPrompts } from '../data/languagePrompts';
 import { getSkillLevel, SKILL_LEVELS } from '../data/skills';
 
@@ -332,15 +332,33 @@ const InitialTest = () => {
     localStorage.setItem('hasCompletedInitialTest', 'true');
     localStorage.setItem('hasVisitedDashboard', 'true');
 
+    const currentUser = authService.getCurrentUser();
+    const email = currentUser?.email;
+    let profileId = null;
+
+    if (email) {
+      profileId = profileService.generateProfileId(language, accent);
+      const profile = {
+        profileId,
+        language,
+        accent,
+        overallScore: avgScore,
+        skillLevel: skillRank,
+        totalSessions: 0,
+        practiceTime: 0,
+        struggleAreas: [],
+        createdAt: new Date().toISOString(),
+        lastPracticed: Date.now(),
+      };
+
+      profileService.upsertProfile(profile, email);
+      profileService.setSelectedProfileId(profileId, email);
+    }
+
     // Navigate to practice transition screen
     navigate('/practice-transition', {
       state: {
-        profile: {
-        language: language,
-          accent: accent,
-          overallScore: avgScore,
-          skillLevel: skillRank,
-        },
+        profileId,
         accent: accent,
         fromInitialTest: true,
       },
