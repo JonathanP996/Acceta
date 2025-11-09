@@ -393,11 +393,12 @@ def generate_conversational_response(
     """
     Generate a friendly, conversational AI response
     """
+    target_accent_lower = target_accent.lower()
+    is_beijing_mandarin = "beijing" in target_accent_lower and "mandarin" in target_accent_lower
+    
     # Handle initial greeting - MUST use Gemini, no fallback
     if not user_message or user_message.strip() == "":
         # Hardcoded greeting for Beijing Mandarin
-        target_accent_lower = target_accent.lower()
-        is_beijing_mandarin = "beijing" in target_accent_lower and "mandarin" in target_accent_lower
         
         if is_beijing_mandarin:
             return "你好 (Nǐ hǎo)! I'm Wally — your AI accent coach. Would you like me to help you learn the Beijing Mandarin accent? It's famous for its clear tones and the \"儿化音\" — that charming -er sound at the end of words."
@@ -446,6 +447,10 @@ def generate_conversational_response(
 用中文自然地回复1-2句话。进行正常的对话 - 承认他们说的话，分享你的想法，提出后续问题。对他们说的话真正感兴趣。只有在有明显问题时才自然地给出发音建议，并随意地融入（比如"顺便说一下，那个词说得很好！"或"嘿，试试把那个音发得更清楚一点"）。但主要是像朋友一样聊天。
     
 如果他们的发音有问题，特别是北京口音的特点（比如儿化音、卷舌音），可以友好地给出建议。"""
+    
+    if is_beijing_mandarin:
+        system_prompt += """
+同时，请确保每次回复都给出与北京口音相关的建议。可以提醒对方注意儿化音（-r结尾）、卷舌音（zh/ch/sh/r）、声调起伏或地道的北京表达。必要时提供拼音（例如 chī le'r）帮助他们模仿，让对话既自然又具备指导性。"""
     
     # Add pronunciation feedback if available (keep concise) - HARDCODED: Always in Chinese
     if pronunciation_score is not None:
@@ -876,7 +881,9 @@ async def chat_message(request: ChatRequest):
     """
     try:
         logger.info(f"Generating chat response for session {request.session_id}")
-        
+        target_accent_lower = (request.target_accent or "").lower()
+        is_beijing_mandarin = "beijing" in target_accent_lower and "mandarin" in target_accent_lower
+         
         # Convert conversation history to dict format
         history = []
         if request.conversation_history:
@@ -899,9 +906,15 @@ async def chat_message(request: ChatRequest):
         pronunciation_feedback = None
         if request.pronunciation_score is not None and request.pronunciation_score < 70:
             if request.struggle_areas:
-                pronunciation_feedback = f"嘿，试试改进一下'{request.struggle_areas[0]}'这个音 - 你已经做得很好了！"
+                if is_beijing_mandarin:
+                    pronunciation_feedback = f"不错，咱们再在‘{request.struggle_areas[0]}’这个部分多下点功夫。试着把卷舌音和儿化音带出来，比如把结尾拖成轻轻的 -r。你已经很接近北京味儿了！"
+                else:
+                    pronunciation_feedback = f"嘿，试试改进一下'{request.struggle_areas[0]}'这个音 - 你已经做得很好了！"
             else:
-                pronunciation_feedback = "继续努力 - 你正在进步！"
+                if is_beijing_mandarin:
+                    pronunciation_feedback = "继续努力！可以多练练儿化音，比如把‘吃了’说成 chī le'r，让语气更有北京味儿。"
+                else:
+                    pronunciation_feedback = "继续努力 - 你正在进步！"
         
         # Generate TTS audio - HARDCODED: Always use Chinese voice for Wally
         try:
