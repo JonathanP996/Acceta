@@ -1,147 +1,0 @@
-================================================================================
-🚀 ENGLISH-FOCUSED ACCENT DETECTION MODEL TRAINING
-================================================================================
-Implementing all 8 strategies for optimal English detection
-================================================================================
-
-================================================================================
-📂 STEP 1: Loading audio files...
-================================================================================
-Found 2142 audio files
-
-Total unique labels: 204
-
-================================================================================
-📊 STEP 2: Filtering to 15 phonetically distinct classes...
-================================================================================
-  ✅ english        :  579 samples
-  ✅ mandarin       :   65 samples
-  ✅ japanese       :   27 samples
-  ✅ korean         :   52 samples
-  ✅ arabic         :  102 samples
-  ✅ hindi          :   18 samples
-  ✅ russian        :   48 samples
-  ✅ spanish        :  162 samples
-  ✅ french         :   63 samples
-  ✅ german         :   36 samples
-  ✅ italian        :   33 samples
-  ✅ thai           :   15 samples
-  ✅ turkish        :   37 samples
-  ✅ malayalam      :    4 samples
-  ✅ tamil          :    6 samples
-
-✅ Selected 15 classes:
-  ⭐  1. english        :  579 samples
-      2. mandarin       :   65 samples
-      3. japanese       :   27 samples
-      4. korean         :   52 samples
-      5. arabic         :  102 samples
-      6. hindi          :   18 samples
-      7. russian        :   48 samples
-      8. spanish        :  162 samples
-      9. french         :   63 samples
-     10. german         :   36 samples
-     11. italian        :   33 samples
-     12. thai           :   15 samples
-     13. turkish        :   37 samples
-     14. malayalam      :    4 samples
-     15. tamil          :    6 samples
-
-Using 1247 files for training (15 classes)
-
-================================================================================
-🎵 STEP 3: Extracting MFCC features...
-================================================================================
-⚠️  CRITICAL: Using librosa.load() to match preprocess.py exactly
-
-Processing audio files...
-Extracting features:   0%|          | 0/1247 [00:00<?, ?it/s]Extracting features:   0%|          | 1/1247 [00:00<13:34,  1.53it/s]Extracting features:   1%|          | 9/1247 [00:00<01:20, 15.38it/s]Extracting features:   1%|▏         | 16/1247 [00:00<00:47, 26.06it/s]Extracting features:   2%|▏         | 24/1247 [00:00<00:33, 36.97it/s]Extracting features:   2%|▏         | 31/1247 [00:01<00:27, 44.71it/s]Extracting features:   3%|▎         | 39/1247 [00:01<00:22, 52.78it/s]Extracting features:   4%|▍         | 47/1247 [00:01<00:20, 58.64it/s]Extracting features:   4%|▍         | 55/1247 [00:01<00:18, 64.27it/s]Extracting features:   5%|▌         | 63/1247 [00:01<00:18, 62.88it/s]Extracting features:   6%|▌         | 70/1247 [00:01<00:18, 64.39it/s]Extracting features:   6%|▌         | 77/1247 [00:01<00:18, 64.70it/s]Extracting features:   7%|▋         | 84/1247 [00:01<00:17, 65.60it/s]Extracting features:   7%|▋         | 92/1247 [00:01<00:16, 68.29it/s]Extracting features:   8%|▊         | 99/1247 [00:02<00:16, 68.23it/s]Extracting features:   9%|▊         | 107/1247 [00:02<00:16, 69.30it/s]Extracting features:   9%|▉         | 115/1247 [00:02<00:16, 68.82it/s]Extracting features:  10%|▉         | 122/1247 [00:02<00:16, 68.55it/s]Extracting features:  10%|█         | 129/1247 [00:02<00:16, 66.91it/s]Extracting features:  11%|█         | 136/1247 [00:02<00:16, 65.76it/s]Extracting features:  11%|█▏        | 143/1247 [00:02<00:16, 66.69it/s]Extracting features:  12%|█▏        | 150/1247 [00:02<00:16, 65.30it/s]Extracting features:  13%|█▎        | 157/1247 [00:02<00:17, 63.23it/s]Extracting features:  13%|█▎        | 164/1247 [00:03<00:16, 64.20it/s]Extracting features:  14%|█▎        | 171/1247 [00:03<00:17, 62.65it/s]Extracting features:  14%|█▍        | 178/1247 [00:03<00:16, 64.09it/s]Extracting features:  15%|█▍        | 185/1247 [00:03<00:22, 47.31it/s]Extracting features:  15%|█▌        | 191/1247 [00:03<00:25, 41.44it/s]Extracting features:  16%|█▌        | 196/1247 [00:03<00:24, 42.47it/s]Extracting features:  16%|█▋        | 203/1247 [00:03<00:21, 48.24it/s]Extracting features:  17%|█▋        | 210/1247 [00:04<00:19, 53.13it/s]Extracting features:  17%|█▋        | 218/1247 [00:04<00:17, 57.87it/s]Extracting features:  18%|█▊        | 225/1247 [00:04<00:17, 59.63it/s]Extracting features:  19%|█▊        | 232/1247 [00:04<00:16, 61.06it/s]Extracting features:  19%|█▉        | 239/1247 [00:04<00:16, 62.37it/s]Extracting features:  20%|█▉        | 246/1247 [00:04<00:15, 63.98it/s]Extracting features:  20%|██        | 253/1247 [00:04<00:15, 64.49it/s]Extracting features:  21%|██        | 261/1247 [00:04<00:14, 68.28it/s]Extracting features:  22%|██▏       | 269/1247 [00:04<00:13, 70.32it/s]Extracting features:  22%|██▏       | 277/1247 [00:05<00:14, 66.12it/s]Extracting features:  23%|██▎       | 284/1247 [00:05<00:14, 66.15it/s]Extracting features:  23%|██▎       | 291/1247 [00:05<00:14, 66.03it/s]Extracting features:  24%|██▍       | 299/1247 [00:05<00:14, 66.41it/s]Extracting features:  25%|██▍       | 306/1247 [00:05<00:14, 66.25it/s]Extracting features:  25%|██▌       | 313/1247 [00:05<00:14, 65.98it/s]Extracting features:  26%|██▌       | 320/1247 [00:05<00:14, 63.18it/s]Extracting features:  26%|██▌       | 327/1247 [00:05<00:14, 65.03it/s]Extracting features:  27%|██▋       | 334/1247 [00:05<00:14, 64.94it/s]Extracting features:  27%|██▋       | 341/1247 [00:05<00:13, 66.35it/s]Extracting features:  28%|██▊       | 349/1247 [00:06<00:13, 68.08it/s]Extracting features:  29%|██▊       | 356/1247 [00:06<00:13, 65.80it/s]Extracting features:  29%|██▉       | 364/1247 [00:06<00:12, 68.10it/s]Extracting features:  30%|██▉       | 371/1247 [00:06<00:12, 68.25it/s]Extracting features:  30%|███       | 378/1247 [00:06<00:12, 67.63it/s]Extracting features:  31%|███       | 386/1247 [00:06<00:12, 70.20it/s]Extracting features:  32%|███▏      | 394/1247 [00:06<00:12, 69.45it/s]Extracting features:  32%|███▏      | 401/1247 [00:06<00:12, 68.10it/s]Extracting features:  33%|███▎      | 408/1247 [00:06<00:12, 65.27it/s]Extracting features:  33%|███▎      | 415/1247 [00:07<00:12, 66.12it/s]Extracting features:  34%|███▍      | 423/1247 [00:07<00:12, 68.62it/s]Extracting features:  35%|███▍      | 431/1247 [00:07<00:11, 69.52it/s]Extracting features:  35%|███▌      | 438/1247 [00:07<00:11, 69.30it/s]Extracting features:  36%|███▌      | 446/1247 [00:07<00:11, 70.68it/s]Extracting features:  36%|███▋      | 454/1247 [00:07<00:11, 68.56it/s]Extracting features:  37%|███▋      | 461/1247 [00:07<00:11, 66.89it/s]Extracting features:  38%|███▊      | 469/1247 [00:07<00:11, 67.75it/s]Extracting features:  38%|███▊      | 476/1247 [00:07<00:11, 67.79it/s]Extracting features:  39%|███▊      | 483/1247 [00:08<00:17, 43.94it/s]Extracting features:  39%|███▉      | 489/1247 [00:08<00:18, 41.17it/s]Extracting features:  40%|███▉      | 496/1247 [00:08<00:16, 45.80it/s]Extracting features:  40%|████      | 502/1247 [00:08<00:15, 47.86it/s]Extracting features:  41%|████      | 509/1247 [00:08<00:14, 51.97it/s]Extracting features:  41%|████▏     | 517/1247 [00:08<00:12, 56.66it/s]Extracting features:  42%|████▏     | 524/1247 [00:08<00:12, 58.43it/s]Extracting features:  43%|████▎     | 531/1247 [00:09<00:11, 60.73it/s]Extracting features:  43%|████▎     | 539/1247 [00:09<00:11, 63.87it/s]Extracting features:  44%|████▍     | 546/1247 [00:09<00:11, 62.11it/s]Extracting features:  44%|████▍     | 553/1247 [00:09<00:11, 60.17it/s]Extracting features:  45%|████▍     | 560/1247 [00:09<00:11, 58.51it/s]Extracting features:  45%|████▌     | 566/1247 [00:09<00:18, 37.33it/s]Extracting features:  46%|████▌     | 571/1247 [00:10<00:18, 37.41it/s]Extracting features:  46%|████▌     | 576/1247 [00:10<00:16, 39.53it/s]Extracting features:  47%|████▋     | 583/1247 [00:10<00:14, 46.17it/s]Extracting features:  47%|████▋     | 591/1247 [00:10<00:12, 53.72it/s]Extracting features:  48%|████▊     | 599/1247 [00:10<00:10, 59.08it/s]Extracting features:  49%|████▊     | 606/1247 [00:10<00:10, 61.53it/s]Extracting features:  49%|████▉     | 614/1247 [00:10<00:09, 65.61it/s]Extracting features:  50%|████▉     | 622/1247 [00:10<00:09, 68.65it/s]Extracting features:  51%|█████     | 630/1247 [00:10<00:08, 69.99it/s]Extracting features:  51%|█████     | 639/1247 [00:10<00:08, 72.70it/s]Extracting features:  52%|█████▏    | 647/1247 [00:11<00:08, 70.83it/s]Extracting features:  53%|█████▎    | 655/1247 [00:11<00:08, 71.57it/s]Extracting features:  53%|█████▎    | 663/1247 [00:11<00:08, 71.96it/s]Extracting features:  54%|█████▍    | 671/1247 [00:11<00:07, 72.66it/s]Extracting features:  54%|█████▍    | 679/1247 [00:11<00:07, 71.51it/s]Extracting features:  55%|█████▌    | 687/1247 [00:11<00:07, 71.94it/s]Extracting features:  56%|█████▌    | 695/1247 [00:11<00:07, 71.31it/s]Extracting features:  56%|█████▋    | 703/1247 [00:11<00:07, 71.31it/s]Extracting features:  57%|█████▋    | 711/1247 [00:11<00:07, 71.87it/s]Extracting features:  58%|█████▊    | 719/1247 [00:12<00:07, 72.11it/s]Extracting features:  58%|█████▊    | 727/1247 [00:12<00:07, 72.20it/s]Extracting features:  59%|█████▉    | 735/1247 [00:12<00:07, 70.75it/s]Extracting features:  60%|█████▉    | 743/1247 [00:12<00:07, 71.31it/s]Extracting features:  60%|██████    | 751/1247 [00:12<00:06, 71.58it/s]Extracting features:  61%|██████    | 759/1247 [00:12<00:06, 70.87it/s]Extracting features:  62%|██████▏   | 767/1247 [00:12<00:06, 72.24it/s]Extracting features:  62%|██████▏   | 775/1247 [00:12<00:06, 72.81it/s]Extracting features:  63%|██████▎   | 783/1247 [00:12<00:06, 72.49it/s]Extracting features:  63%|██████▎   | 791/1247 [00:13<00:06, 70.41it/s]Extracting features:  64%|██████▍   | 799/1247 [00:13<00:06, 70.25it/s]Extracting features:  65%|██████▍   | 807/1247 [00:13<00:06, 70.25it/s]Extracting features:  65%|██████▌   | 815/1247 [00:13<00:06, 68.08it/s]Extracting features:  66%|██████▌   | 822/1247 [00:13<00:06, 67.59it/s]Extracting features:  67%|██████▋   | 830/1247 [00:13<00:05, 69.90it/s]Extracting features:  67%|██████▋   | 838/1247 [00:13<00:05, 69.90it/s]Extracting features:  68%|██████▊   | 846/1247 [00:13<00:05, 69.33it/s]Extracting features:  68%|██████▊   | 854/1247 [00:14<00:05, 70.89it/s]Extracting features:  69%|██████▉   | 862/1247 [00:14<00:05, 72.29it/s]Extracting features:  70%|██████▉   | 870/1247 [00:14<00:05, 73.58it/s]Extracting features:  70%|███████   | 878/1247 [00:14<00:05, 72.87it/s]Extracting features:  71%|███████   | 886/1247 [00:14<00:05, 71.68it/s]Extracting features:  72%|███████▏  | 894/1247 [00:14<00:05, 69.70it/s]Extracting features:  72%|███████▏  | 901/1247 [00:14<00:04, 69.62it/s]Extracting features:  73%|███████▎  | 908/1247 [00:14<00:04, 68.94it/s]Extracting features:  73%|███████▎  | 916/1247 [00:14<00:04, 69.14it/s]Extracting features:  74%|███████▍  | 925/1247 [00:15<00:04, 72.84it/s]Extracting features:  75%|███████▍  | 933/1247 [00:15<00:04, 73.76it/s]Extracting features:  75%|███████▌  | 941/1247 [00:15<00:04, 73.32it/s]Extracting features:  76%|███████▌  | 949/1247 [00:15<00:04, 73.70it/s]Extracting features:  77%|███████▋  | 957/1247 [00:15<00:03, 75.28it/s]Extracting features:  77%|███████▋  | 965/1247 [00:15<00:03, 75.03it/s]Extracting features:  78%|███████▊  | 973/1247 [00:15<00:03, 73.22it/s]Extracting features:  79%|███████▊  | 981/1247 [00:15<00:03, 72.79it/s]Extracting features:  79%|███████▉  | 989/1247 [00:15<00:03, 72.83it/s]Extracting features:  80%|████████  | 998/1247 [00:15<00:03, 74.63it/s]Extracting features:  81%|████████  | 1006/1247 [00:16<00:03, 72.26it/s]Extracting features:  81%|████████▏ | 1015/1247 [00:16<00:03, 75.07it/s]Extracting features:  82%|████████▏ | 1023/1247 [00:16<00:03, 73.64it/s]Extracting features:  83%|████████▎ | 1032/1247 [00:16<00:02, 75.48it/s]Extracting features:  83%|████████▎ | 1040/1247 [00:16<00:02, 72.46it/s]Extracting features:  84%|████████▍ | 1048/1247 [00:16<00:02, 71.73it/s]Extracting features:  85%|████████▍ | 1056/1247 [00:16<00:02, 70.06it/s]Extracting features:  85%|████████▌ | 1064/1247 [00:16<00:02, 70.80it/s]Extracting features:  86%|████████▌ | 1072/1247 [00:17<00:02, 72.19it/s]Extracting features:  87%|████████▋ | 1080/1247 [00:17<00:02, 71.32it/s]Extracting features:  87%|████████▋ | 1088/1247 [00:17<00:02, 73.20it/s]Extracting features:  88%|████████▊ | 1096/1247 [00:17<00:02, 73.41it/s]Extracting features:  89%|████████▊ | 1104/1247 [00:17<00:01, 73.45it/s]Extracting features:  89%|████████▉ | 1112/1247 [00:17<00:01, 73.42it/s]Extracting features:  90%|████████▉ | 1120/1247 [00:17<00:01, 75.23it/s]Extracting features:  90%|█████████ | 1128/1247 [00:17<00:01, 72.22it/s]Extracting features:  91%|█████████ | 1136/1247 [00:17<00:01, 71.77it/s]Extracting features:  92%|█████████▏| 1144/1247 [00:18<00:01, 72.52it/s]Extracting features:  92%|█████████▏| 1153/1247 [00:18<00:01, 75.52it/s]Extracting features:  93%|█████████▎| 1161/1247 [00:18<00:01, 75.65it/s]Extracting features:  94%|█████████▎| 1169/1247 [00:18<00:01, 73.40it/s]Extracting features:  94%|█████████▍| 1177/1247 [00:18<00:00, 73.36it/s]Extracting features:  95%|█████████▌| 1185/1247 [00:18<00:00, 72.38it/s]Extracting features:  96%|█████████▌| 1193/1247 [00:18<00:00, 71.48it/s]Extracting features:  96%|█████████▋| 1201/1247 [00:18<00:00, 70.73it/s]Extracting features:  97%|█████████▋| 1209/1247 [00:18<00:00, 72.01it/s]Extracting features:  98%|█████████▊| 1217/1247 [00:19<00:00, 73.60it/s]Extracting features:  98%|█████████▊| 1225/1247 [00:19<00:00, 74.54it/s]Extracting features:  99%|█████████▉| 1233/1247 [00:19<00:00, 73.81it/s]Extracting features: 100%|█████████▉| 1241/1247 [00:19<00:00, 69.70it/s]Extracting features: 100%|██████████| 1247/1247 [00:19<00:00, 64.15it/s]
-/Users/jsmat/gaTech/AI@GT/Accenta/venv/lib/python3.11/site-packages/keras/src/layers/convolutional/base_conv.py:113: UserWarning: Do not pass an `input_shape`/`input_dim` argument to a layer. When using Sequential models, prefer using an `Input(shape)` object as the first layer in the model instead.
-  super().__init__(activity_regularizer=activity_regularizer, **kwargs)
-
-✅ Successfully processed 1247 audio files
-
-================================================================================
-📊 STEP 4: Converting to DataFrame...
-================================================================================
-DataFrame shape: (1247, 14)
-
-================================================================================
-🧹 STEP 5: Cleaning data...
-================================================================================
-After cleaning: 1247 samples
-
-================================================================================
-🌈 STEP 6: Balancing dataset with English oversampling...
-================================================================================
-Strategy: Oversample English to 120% of max count
-
-Label distribution:
-  Min: 4, Max: 579, Mean: 83.1
-
-Oversampling targets:
-  English: 694 samples (20% more than max: 579)
-  Others: 463 samples (80% of max)
-  ⭐ English: 579 → 694 samples (oversampled)
-     spanish        :  162 →  463 samples
-     arabic         :  102 →  463 samples
-     mandarin       :   65 →  463 samples
-     french         :   63 →  463 samples
-     korean         :   52 →  463 samples
-     russian        :   48 →  463 samples
-     turkish        :   37 →  463 samples
-     german         :   36 →  463 samples
-     italian        :   33 →  463 samples
-     japanese       :   27 →  463 samples
-     hindi          :   18 →  463 samples
-     thai           :   15 →  463 samples
-     tamil          :    6 →  463 samples
-     malayalam      :    4 →  463 samples
-
-✅ After balancing: 694 samples
-  ⭐ English samples: 694
-  📊 Classes: 1
-
-================================================================================
-✂️ STEP 7: Preparing features...
-================================================================================
-Features shape: (694, 13)
-Number of classes: 1
-Classes: ['english']
-
-================================================================================
-⚖️ STEP 8: Computing class weights with English boost...
-================================================================================
-  ⭐ English class weight: 1.0000 → 2.0000 (boosted 2.0x)
-
-================================================================================
-📊 STEP 9: Splitting data...
-================================================================================
-Training: 555 samples
-Test: 139 samples
-
-================================================================================
-🏋️ STEP 10: Building improved model architecture...
-================================================================================
-Strategy 5: 3 Conv1D layers (64, 128, 256) + 2 Dense layers (512, 256)
-Traceback (most recent call last):
-  File "/Users/jsmat/gaTech/AI@GT/the new model/train_model_english_focused_v2.py", line 401, in <module>
-    model = create_improved_model(input_shape, num_classes)
-            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/jsmat/gaTech/AI@GT/the new model/train_model_english_focused_v2.py", line 355, in create_improved_model
-    model = Sequential([
-            ^^^^^^^^^^^^
-  File "/Users/jsmat/gaTech/AI@GT/Accenta/venv/lib/python3.11/site-packages/keras/src/models/sequential.py", line 76, in __init__
-    self._maybe_rebuild()
-  File "/Users/jsmat/gaTech/AI@GT/Accenta/venv/lib/python3.11/site-packages/keras/src/models/sequential.py", line 149, in _maybe_rebuild
-    self.build(input_shape)
-  File "/Users/jsmat/gaTech/AI@GT/Accenta/venv/lib/python3.11/site-packages/keras/src/layers/layer.py", line 231, in build_wrapper
-    original_build_method(*args, **kwargs)
-  File "/Users/jsmat/gaTech/AI@GT/Accenta/venv/lib/python3.11/site-packages/keras/src/models/sequential.py", line 195, in build
-    x = layer(x)
-        ^^^^^^^^
-  File "/Users/jsmat/gaTech/AI@GT/Accenta/venv/lib/python3.11/site-packages/keras/src/utils/traceback_utils.py", line 122, in error_handler
-    raise e.with_traceback(filtered_tb) from None
-  File "/Users/jsmat/gaTech/AI@GT/Accenta/venv/lib/python3.11/site-packages/keras/src/ops/operation_utils.py", line 221, in compute_conv_output_shape
-    raise ValueError(
-ValueError: Computed output size would be negative. Received `inputs shape=(None, 1, 128)`, `kernel shape=(3, 128, 256)`, `dilation_rate=[1]`.
