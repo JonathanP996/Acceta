@@ -108,16 +108,33 @@ async def detect_accent(
             else:
                 # Default to wav if no extension
                 file_extension = '.wav'
-        # If filename has extension but content-type suggests browser recording, 
-        # check if it's a converted file (recording.wav from browser = likely WebM source)
-        elif file_extension == '.wav' and ('recording.wav' in (audio_file.filename or '') or len(audio_bytes) < 100000):
-            # Small WAV files or files named "recording.wav" are likely browser recordings
-            # Treat as WebM for better resampling quality
-            file_extension = '.webm'
-            logger.info(f"Detected browser recording (WAV converted from WebM): {audio_file.filename}")
+        # CRITICAL: Match working Flask app exactly
+        # Detect if this is a microphone recording
+        # Microphone recordings typically:
+        # 1. Have filename like "recording.wav", "recording.webm", or empty
+        # 2. Have content-type like "audio/wav", "audio/webm", "audio/ogg"
+        # 3. Are not traditional file uploads (which have descriptive filenames)
+        is_microphone = (
+            (audio_file.filename or '').lower() in ['recording.wav', 'recording.webm', 'recording.ogg', ''] or
+            'recording' in (audio_file.filename or '').lower() or
+            (file_extension in ['.wav', '.webm', '.ogg'] and 
+             ('webm' in content_type or 'wav' in content_type or 'ogg' in content_type or 'opus' in content_type))
+        )
         
-        # Use predict_from_bytes method
-        result = detector.predict_from_bytes(audio_bytes, file_extension=file_extension)
+        if is_microphone:
+            logger.info(f"🎤 Detected microphone recording: {audio_file.filename} (will use kaiser_best resampling, normalization DISABLED)")
+            logger.info(f"   Content-Type: {content_type}, File extension: {file_extension}")
+            logger.info(f"   File size: {len(audio_bytes)} bytes")
+        else:
+            logger.info(f"📁 Processing as regular file: {audio_file.filename} (will use default resampling)")
+        
+        # Use predict_from_bytes method with microphone recording flag
+        # This ensures proper resampling (kaiser_best for microphone, default for files)
+        result = detector.predict_from_bytes(
+            audio_bytes, 
+            file_extension=file_extension,
+            is_microphone_recording=is_microphone
+        )
         
         logger.info(f"Accent detection result: {result['accent']} ({result['confidence']:.2f}%)")
         

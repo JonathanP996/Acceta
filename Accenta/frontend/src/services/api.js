@@ -113,9 +113,9 @@ export const authService = {
 export const accentDetectionService = {
   detectAccent: async (audioBlob) => {
     const formData = new FormData();
-    // Send with .webm.wav hint to help backend detect browser recording
-    // Backend will use better resampling (kaiser_best) if it detects this
-    formData.append('audio_file', audioBlob, 'recording.webm.wav');
+    // CRITICAL: Match working HTML exactly - use 'recording.wav' filename
+    // Backend detects browser recordings by filename pattern
+    formData.append('audio_file', audioBlob, 'recording.wav');
     
     const response = await api.post(API_ENDPOINTS.DETECT_ACCENT, formData, {
       headers: {

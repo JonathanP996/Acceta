@@ -1,0 +1,120 @@
+{
+  "summary": {
+    "total_tests": 5,
+    "successful": 5,
+    "correct": 4,
+    "accuracy": 80.0
+  },
+  "results": [
+    {
+      "file": "JonathanEnergetic.mp3",
+      "expected": "english",
+      "predicted": "english",
+      "confidence": 99.42,
+      "correct": true,
+      "is_uncertain": false,
+      "top_3": [
+        {
+          "accent": "english",
+          "confidence": 99.42161560058594
+        },
+        {
+          "accent": "mandarin",
+          "confidence": 0.35904768109321594
+        },
+        {
+          "accent": "italian",
+          "confidence": 0.19179730117321014
+        }
+      ]
+    },
+    {
+      "file": "JonathanMonotone.mp3",
+      "expected": "english",
+      "predicted": "english",
+      "confidence": 95.81,
+      "correct": true,
+      "is_uncertain": false,
+      "top_3": [
+        {
+          "accent": "english",
+          "confidence": 95.81475830078125
+        },
+        {
+          "accent": "mandarin",
+          "confidence": 2.710632085800171
+        },
+        {
+          "accent": "turkish",
+          "confidence": 0.6557189226150513
+        }
+      ]
+    },
+    {
+      "file": "JonathanMixed.mp3",
+      "expected": "english",
+      "predicted": "mandarin",
+      "confidence": 52.95,
+      "correct": false,
+      "is_uncertain": false,
+      "top_3": [
+        {
+          "accent": "mandarin",
+          "confidence": 52.953243255615234
+        },
+        {
+          "accent": "english",
+          "confidence": 47.0181999206543
+        },
+        {
+          "accent": "russian",
+          "confidence": 0.008150882087647915
+        }
+      ]
+    },
+    {
+      "file": "JonathanEnergeticPrompt2.mp3",
+      "expected": "english",
+      "predicted": "english",
+      "confidence": 97.09,
+      "correct": true,
+      "is_uncertain": false,
+      "top_3": [
+        {
+          "accent": "english",
+          "confidence": 97.08582305908203
+        },
+        {
+          "accent": "korean",
+          "confidence": 1.224574327468872
+        },
+        {
+          "accent": "mandarin",
+          "confidence": 1.122931718826294
+        }
+      ]
+    },
+    {
+      "file": "JonathanEnergetic2.mp3",
+      "expected": "english",
+      "predicted": "english",
+      "confidence": 98.08,
+      "correct": true,
+      "is_uncertain": false,
+      "top_3": [
+        {
+          "accent": "english",
+          "confidence": 98.08035278320312
+        },
+        {
+          "accent": "italian",
+          "confidence": 1.2384637594223022
+        },
+        {
+          "accent": "mandarin",
+          "confidence": 0.6675193309783936
+        }
+      ]
+    }
+  ]
+}

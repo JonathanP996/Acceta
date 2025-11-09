@@ -5,28 +5,28 @@ import WaveformVisualization from './WaveformVisualization';
 import { ttsService, accentDetectionService } from '../services/api';
 import { getPracticePhrases } from '../data/languagePrompts';
 
-// Default practice phrases (fallback)
+// Default practice phrases (fallback) - Short single sentences
 export const PRACTICE_PHRASES = [
   "Hello, how are you today?",
-  "I would like a cup of coffee",
-  "The weather is beautiful",
+  "I would like a cup of coffee.",
+  "The weather is beautiful today.",
   "Can you help me please?",
-  "Thank you very much",
-  "I'm learning a new language",
+  "Thank you very much.",
+  "I'm learning a new language.",
   "What time is it?",
-  "I love practicing pronunciation",
-  "This is challenging but fun",
-  "I'm making great progress",
-  "Practice makes perfect",
-  "I can do this",
-  "Every day I improve",
-  "Pronunciation is important",
-  "I'm getting better",
-  "Keep practicing",
-  "You're doing great",
-  "Don't give up",
-  "Success takes time",
-  "I believe in myself",
+  "I love practicing pronunciation.",
+  "This is challenging but fun.",
+  "I'm making great progress.",
+  "Practice makes perfect.",
+  "I can do this.",
+  "Every day I improve.",
+  "Pronunciation is important.",
+  "I'm getting better at speaking.",
+  "Keep practicing.",
+  "You're doing great.",
+  "Don't give up.",
+  "Success takes time.",
+  "I believe in myself.",
 ];
 
 const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCurated }) => {
@@ -71,6 +71,9 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   const [profileSettings, setProfileSettings] = useState({
     colorScheme: 'blueOrange',
   });
+  const [useFileUpload, setUseFileUpload] = useState(false);
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const fileInputRef = useRef(null);
 
   // Load profile settings from localStorage
   useEffect(() => {
@@ -208,7 +211,12 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       setHasPlayedOnce(false);
       // Small delay to ensure component is ready
       const timer = setTimeout(() => {
-        playPhrase();
+        // Handle autoplay errors gracefully - don't let them crash the app
+        playPhrase().catch((error) => {
+          console.warn('Autoplay failed (this is normal if browser blocks autoplay):', error);
+          // Set hasPlayedOnce so user can still record
+          setHasPlayedOnce(true);
+        });
       }, 300);
       return () => clearTimeout(timer);
     }
@@ -400,7 +408,12 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
             await audio.play();
             console.log('✅ Audio playback started after waiting');
           } catch (retryError) {
-            throw new Error('Audio playback blocked. Please click the play button again.');
+            // Autoplay is still blocked - handle gracefully
+            console.warn('⚠️ Audio playback still blocked after retry - user can click Replay button');
+            setIsPlaying(false);
+            setHasPlayedOnce(true); // Allow recording even if audio didn't play
+            // Don't show alert - just log and allow user to continue
+            return; // Exit gracefully without throwing
           }
         } else {
           throw playError;
@@ -409,13 +422,18 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     } catch (error) {
       console.error('❌ Error generating/playing TTS with ElevenLabs:', error);
       setIsPlaying(false);
+      setHasPlayedOnce(true); // Allow recording even if audio failed
       
       // Show user-friendly error message
       const errorMessage = error.message || 'Failed to generate audio with ElevenLabs';
-      alert(`Unable to play audio: ${errorMessage}\n\nPlease ensure:\n- Backend server is running\n- ElevenLabs API key is configured\n- Check browser console for details`);
       
-      // DO NOT use Web Speech API fallback - ElevenLabs is required
-      throw error; // Re-throw to prevent any fallback
+      // Only show alert for non-autoplay errors
+      if (!errorMessage.includes('Audio playback blocked')) {
+        alert(`Unable to play audio: ${errorMessage}\n\nPlease ensure:\n- Backend server is running\n- ElevenLabs API key is configured\n- Check browser console for details`);
+      }
+      
+      // Don't re-throw - allow user to continue
+      return;
     }
   };
 
@@ -463,6 +481,8 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       setAudioData(null);
       setAnalysisResult(null);
       setHasPlayedOnce(false);
+      setUploadedFile(null);
+      setUseFileUpload(false);
     } else {
       // Practice complete
       navigate('/dashboard', { state: { practiceComplete: true, isCurated } });
@@ -473,6 +493,43 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     setShowWaveform(false);
     setAudioData(null);
     setAnalysisResult(null);
+    setUploadedFile(null);
+  };
+
+  const handleFileUpload = async (file) => {
+    if (!file) return;
+    
+    setIsProcessing(true);
+    setAnalysisResult(null);
+    setUploadedFile(file);
+    
+    try {
+      console.log('📁 Detecting accent from uploaded file:', file.name);
+      
+      // Detect accent from the uploaded file
+      const result = await accentDetectionService.detectAccent(file);
+      
+      console.log('✅ Accent detection result:', result);
+      setAnalysisResult(result);
+    } catch (error) {
+      console.error('❌ Accent detection error:', error);
+      setAnalysisResult({
+        error: error.response?.data?.detail || error.message || 'Failed to detect accent. Please try again.',
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleFileUpload(file);
+    }
+    // Reset input so same file can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   return (
@@ -549,7 +606,51 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
               </button>
             </div>
 
+            {/* Toggle between Microphone and File Upload */}
+            <div className="flex justify-center gap-4 mt-4 mb-2">
+              <button
+                onClick={() => setUseFileUpload(false)}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                  !useFileUpload
+                    ? 'bg-accenta-primary text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                🎤 Microphone
+              </button>
+              <button
+                onClick={() => {
+                  setUseFileUpload(true);
+                  fileInputRef.current?.click();
+                }}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                  useFileUpload
+                    ? 'bg-accenta-primary text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                📁 Upload File
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*,.mp3,.wav,.m4a,.flac,.webm,.ogg"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+            </div>
+
+            {/* Show uploaded file name */}
+            {uploadedFile && (
+              <div className="text-center mt-2 mb-2">
+                <span className="text-sm text-gray-600">
+                  📄 {uploadedFile.name}
+                </span>
+              </div>
+            )}
+
             {/* Recording Button with Waveform Animation - Below replay */}
+            {!useFileUpload && (
             <div className="flex flex-col items-center justify-center relative mt-6" style={{ minHeight: '200px', width: '400px' }}>
               {/* Waveform Background - Always visible when recording */}
               {isRecording && (
@@ -678,6 +779,33 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
                 </div>
               </div>
             </div>
+            )}
+
+            {/* File Upload Area - Shown when useFileUpload is true */}
+            {useFileUpload && (
+              <div className="flex flex-col items-center justify-center relative mt-6" style={{ minHeight: '200px', width: '400px' }}>
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-accenta-primary transition-colors cursor-pointer"
+                     onClick={() => fileInputRef.current?.click()}>
+                  <svg className="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  <p className="text-gray-600 font-medium">Click to upload audio file</p>
+                  <p className="text-gray-400 text-sm mt-2">MP3, WAV, M4A, FLAC, WebM, OGG</p>
+                  {uploadedFile && (
+                    <p className="text-accenta-primary text-sm mt-2 font-semibold">
+                      ✓ {uploadedFile.name}
+                    </p>
+                  )}
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="audio/*,.mp3,.wav,.m4a,.flac,.webm,.ogg"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+              </div>
+            )}
 
           </div>
 
@@ -704,7 +832,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
                   </p>
                     <p className="text-sm text-yellow-700 mt-1">
                     The model is uncertain about this prediction. Please check the top predictions below.
-                  </p>
+                    </p>
                 </div>
               )}
               

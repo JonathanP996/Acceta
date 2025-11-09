@@ -27,16 +27,16 @@ class AudioCapture {
       console.log('Requesting microphone access...');
       
       // Request microphone access with fallback for browsers that don't support all constraints
+      // CRITICAL: Match working HTML - use 44100 Hz sample rate (not 16kHz!)
       let stream;
       try {
-        // Try with full constraints first
+        // Try with full constraints first - match working HTML exactly
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
+            sampleRate: 44100,
             channelCount: 1,
-            sampleRate: 16000,
             echoCancellation: true,
             noiseSuppression: true,
-            autoGainControl: true,
           },
         });
       } catch (constraintError) {
@@ -67,23 +67,27 @@ class AudioCapture {
       this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
 
       // Create MediaRecorder with fallback options
+      // CRITICAL: Match working HTML - don't constrain bitrate, let browser use default
+      // Determine the best MIME type supported by the browser (match working HTML)
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+      } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+        mimeType = 'audio/ogg;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      }
+      
       let options = {
-        mimeType: 'audio/webm;codecs=opus',
-        audioBitsPerSecond: 16000,
+        mimeType: mimeType,
       };
       
       // Check if the mimeType is supported
       if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        console.warn('WebM Opus not supported, trying fallback formats...');
-        // Try other formats
-        if (MediaRecorder.isTypeSupported('audio/webm')) {
-          options.mimeType = 'audio/webm';
-        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          options.mimeType = 'audio/mp4';
-        } else {
-          // Use default
-          options = {};
-        }
+        console.warn('Selected mimeType not supported, using default');
+        options = {}; // Use browser default
       }
 
       this.mediaRecorder = new MediaRecorder(this.stream, options);
@@ -125,7 +129,8 @@ class AudioCapture {
     this.volumeCallback = volumeCallback;
     
     try {
-      this.mediaRecorder.start();
+      // CRITICAL: Match working HTML - start with timeslice to ensure data is available
+      this.mediaRecorder.start(100); // Collect data every 100ms
       console.log('Recording started successfully');
     } catch (error) {
       this.isRecording = false;
@@ -180,7 +185,9 @@ class AudioCapture {
       this.mediaRecorder.onstop = async () => {
         this.isRecording = false;
         try {
-          const audioBlob = new Blob(this.chunks, { type: 'audio/webm' });
+          // CRITICAL: Match working HTML - use the actual mimeType from MediaRecorder
+          const mimeType = this.mediaRecorder.mimeType || 'audio/webm';
+          const audioBlob = new Blob(this.chunks, { type: mimeType });
           const wavBlob = await this.convertToWAV(audioBlob);
           resolve(wavBlob);
         } catch (error) {
@@ -255,14 +262,13 @@ class AudioCapture {
     view.setUint32(40, length * 2, true);
 
     // Convert float samples to 16-bit PCM
-    // CRITICAL FIX: Use symmetric quantization to avoid DC bias
-    // Old code: negative * 0x8000, positive * 0x7FFF (asymmetric)
-    // New code: symmetric quantization for both positive and negative
+    // CRITICAL: Match working HTML exactly - use ASYMMETRIC quantization
+    // Their working code: sample < 0 ? sample * 0x8000 : sample * 0x7FFF
     let offset = 44;
     for (let i = 0; i < length; i++) {
       const sample = Math.max(-1, Math.min(1, buffer.getChannelData(0)[i]));
-      // Symmetric quantization: multiply by 32767, then clamp to int16 range
-      const quantized = Math.max(-32768, Math.min(32767, Math.round(sample * 32767)));
+      // Match working HTML: asymmetric quantization
+      const quantized = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
       view.setInt16(offset, quantized, true);
       offset += 2;
     }

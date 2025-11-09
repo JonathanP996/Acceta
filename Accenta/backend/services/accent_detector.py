@@ -71,13 +71,14 @@ class AccentDetector:
             self.label_encoder = pickle.load(f)
         print(f"✅ Label encoder loaded. Classes: {list(self.label_encoder.classes_)}")
     
-    def predict(self, audio_path, top_n=3):
+    def predict(self, audio_path, top_n=3, is_microphone_recording=False):
         """
         Predict accent from an audio file.
         
         Args:
             audio_path: Path to the audio file (mp3, wav, m4a, flac, webm, ogg, opus)
             top_n: Number of top predictions to return (default: 3)
+            is_microphone_recording: If True, uses high-quality resampling for microphone recordings
         
         Returns:
             dict with keys:
@@ -91,8 +92,8 @@ class AccentDetector:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
         
-        # Preprocess audio
-        audio_data = preprocess_audio(audio_path)
+        # Preprocess audio (pass is_microphone_recording flag for proper resampling)
+        audio_data = preprocess_audio(audio_path, is_microphone_recording=is_microphone_recording)
         
         # Make prediction
         predictions = self.model.predict(audio_data, verbose=0)
@@ -122,13 +123,14 @@ class AccentDetector:
             return []
         return list(self.label_encoder.classes_)
     
-    def predict_from_bytes(self, audio_bytes, file_extension='.mp3'):
+    def predict_from_bytes(self, audio_bytes, file_extension='.mp3', is_microphone_recording=False):
         """
         Predict accent from audio bytes (useful for web uploads).
         
         Args:
             audio_bytes: Audio file as bytes
             file_extension: File extension (e.g., '.mp3', '.wav', '.webm')
+            is_microphone_recording: If True, uses high-quality resampling for microphone recordings
         
         Returns:
             Same as predict() method
@@ -141,10 +143,12 @@ class AccentDetector:
             tmp_path = tmp_file.name
         
         try:
-            result = self.predict(tmp_path)
+            # Pass is_microphone_recording flag for proper preprocessing
+            result = self.predict(tmp_path, is_microphone_recording=is_microphone_recording)
         finally:
             # Clean up temporary file
-            os.unlink(tmp_path)
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
         
         return result
 
