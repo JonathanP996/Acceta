@@ -125,6 +125,24 @@ export const accentDetectionService = {
     });
     return response.data;
   },
+  
+  getPhonemeFeedback: async (referenceAudioBlob, userAudioBlob, targetText, language = null) => {
+    const formData = new FormData();
+    formData.append('reference_audio', referenceAudioBlob, 'reference.wav');
+    formData.append('user_audio', userAudioBlob, 'user.wav');
+    formData.append('target_text', targetText);
+    if (language) {
+      formData.append('language', language);
+    }
+    
+    const response = await api.post(API_ENDPOINTS.PHONEME_FEEDBACK, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 60000, // 60 second timeout for phoneme analysis
+    });
+    return response.data;
+  },
 };
 
 // TTS services

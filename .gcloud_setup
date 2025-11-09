@@ -1,8 +1,0 @@
-# Add this to your ~/.zshrc to make gcloud available permanently:
-# export PATH="$HOME/gaTech/AI@GT/google-cloud-sdk/bin:$PATH"
-
-# Or source this file in your current session:
-# source .gcloud_setup
-
-export PATH="$HOME/gaTech/AI@GT/google-cloud-sdk/bin:$PATH"
-

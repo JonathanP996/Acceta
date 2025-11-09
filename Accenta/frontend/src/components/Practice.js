@@ -75,6 +75,9 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
   const [uploadedFile, setUploadedFile] = useState(null);
   const fileInputRef = useRef(null);
   const [barWidth, setBarWidth] = useState(0);
+  const [referenceAudioBlob, setReferenceAudioBlob] = useState(null); // Store reference TTS audio
+  const [phonemeFeedback, setPhonemeFeedback] = useState(null); // Store phoneme-level feedback
+  const [isLoadingPhonemeFeedback, setIsLoadingPhonemeFeedback] = useState(false);
 
   // Load profile settings from localStorage
   useEffect(() => {
@@ -332,6 +335,10 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
         throw new Error('Received empty audio blob from TTS service');
       }
       
+      // Store reference audio for phoneme comparison
+      setReferenceAudioBlob(audioBlob);
+      console.log('✅ Stored reference audio blob for phoneme analysis');
+      
       // Create audio element and play immediately
       console.log('🎵 Creating audio element from blob');
       const audioUrl = URL.createObjectURL(audioBlob);
@@ -521,6 +528,29 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
         setBarWidth(Math.min(accentEvaluationScore || 0, 100));
       }, 300);
       
+      // Get phoneme-level feedback if reference audio is available
+      if (referenceAudioBlob && audioBlob) {
+        setIsLoadingPhonemeFeedback(true);
+        try {
+          const languageCode = profile?.language?.id || profile?.language;
+          console.log('🎯 Getting phoneme-level feedback...');
+          const phonemeResult = await accentDetectionService.getPhonemeFeedback(
+            referenceAudioBlob,
+            audioBlob,
+            phrases[currentPhrase],
+            languageCode
+          );
+          console.log('✅ Received phoneme feedback:', phonemeResult);
+          setPhonemeFeedback(phonemeResult);
+        } catch (error) {
+          console.error('Error getting phoneme feedback:', error);
+          // Don't show error to user - phoneme feedback is optional
+          setPhonemeFeedback(null);
+        } finally {
+          setIsLoadingPhonemeFeedback(false);
+        }
+      }
+      
     } catch (error) {
       console.error('Error detecting accent:', error);
       setIsProcessing(false);
@@ -539,6 +569,8 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       setBarWidth(0);
       setUploadedFile(null);
       setUseFileUpload(false);
+      setReferenceAudioBlob(null);
+      setPhonemeFeedback(null);
     } else {
       // Practice complete
       navigate('/dashboard', { state: { practiceComplete: true, isCurated } });
@@ -551,6 +583,7 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
     setAnalysisResult(null);
     setUploadedFile(null);
     setBarWidth(0);
+    setPhonemeFeedback(null);
   };
 
   const handleFileUpload = async (file) => {
@@ -623,6 +656,29 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
       setTimeout(() => {
         setBarWidth(Math.min(accentEvaluationScore || 0, 100));
       }, 300);
+      
+      // Get phoneme-level feedback if reference audio is available
+      if (referenceAudioBlob && file) {
+        setIsLoadingPhonemeFeedback(true);
+        try {
+          const languageCode = profile?.language?.id || profile?.language;
+          console.log('🎯 Getting phoneme-level feedback from file upload...');
+          const phonemeResult = await accentDetectionService.getPhonemeFeedback(
+            referenceAudioBlob,
+            file,
+            phrases[currentPhrase],
+            languageCode
+          );
+          console.log('✅ Received phoneme feedback:', phonemeResult);
+          setPhonemeFeedback(phonemeResult);
+        } catch (error) {
+          console.error('Error getting phoneme feedback:', error);
+          // Don't show error to user - phoneme feedback is optional
+          setPhonemeFeedback(null);
+        } finally {
+          setIsLoadingPhonemeFeedback(false);
+        }
+      }
     } catch (error) {
       console.error('❌ Accent detection error:', error);
       setAnalysisResult({
@@ -1133,6 +1189,81 @@ const Practice = ({ profile: propProfile, customPhrases: propCustomPhrases, isCu
                 </div>
               )}
               
+              {/* Phoneme-Level Feedback */}
+              {phonemeFeedback && !isLoadingPhonemeFeedback && (
+                <div className="mt-6 p-6 bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 rounded-2xl border-2 border-indigo-200 shadow-lg">
+                  <h3 className="text-xl font-bold text-gray-800 mb-4">🎯 Detailed Phoneme Analysis</h3>
+                  
+                  <div className="space-y-4">
+                    {/* Transcriptions */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-white/70 rounded-lg p-3 border border-gray-200">
+                        <p className="text-xs text-gray-600 mb-1">Target Text</p>
+                        <p className="text-sm font-semibold text-gray-800">{phonemeFeedback.target_text}</p>
+                      </div>
+                      <div className="bg-white/70 rounded-lg p-3 border border-gray-200">
+                        <p className="text-xs text-gray-600 mb-1">You Said</p>
+                        <p className="text-sm font-semibold text-gray-800">{phonemeFeedback.user_text}</p>
+                      </div>
+                    </div>
+                    
+                    {/* Phoneme Sequences */}
+                    <div className="bg-white/70 rounded-lg p-3 border border-gray-200">
+                      <p className="text-xs text-gray-600 mb-2">Phoneme Comparison</p>
+                      <div className="space-y-2 text-xs font-mono">
+                        <div>
+                          <span className="text-gray-500">Target:</span>
+                          <span className="ml-2 text-gray-800">{phonemeFeedback.target_phonemes}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Your:</span>
+                          <span className="ml-2 text-gray-800">{phonemeFeedback.user_phonemes}</span>
+                        </div>
+                        <div className="mt-2 pt-2 border-t border-gray-300">
+                          <span className="text-gray-500">Similarity:</span>
+                          <span className={`ml-2 font-bold ${
+                            phonemeFeedback.similarity_score >= 0.8 ? 'text-green-600' :
+                            phonemeFeedback.similarity_score >= 0.6 ? 'text-yellow-600' :
+                            'text-red-600'
+                          }`}>
+                            {(phonemeFeedback.similarity_score * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Gemini Feedback */}
+                    <div className="bg-white/70 rounded-lg p-4 border border-gray-200">
+                      <p className="text-sm font-semibold text-gray-800 mb-2">📝 Pronunciation Feedback</p>
+                      <div className="text-sm text-gray-700 whitespace-pre-wrap">
+                        {phonemeFeedback.feedback}
+                      </div>
+                    </div>
+                    
+                    {/* Specific Improvements */}
+                    {phonemeFeedback.specific_improvements && phonemeFeedback.specific_improvements.length > 0 && (
+                      <div className="bg-white/70 rounded-lg p-4 border border-gray-200">
+                        <p className="text-sm font-semibold text-gray-800 mb-2">✨ Specific Areas to Improve</p>
+                        <ul className="space-y-2">
+                          {phonemeFeedback.specific_improvements.map((improvement, idx) => (
+                            <li key={idx} className="text-sm text-gray-700 flex items-start">
+                              <span className="text-indigo-500 mr-2">•</span>
+                              <span>{improvement}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              
+              {/* Loading indicator for phoneme feedback */}
+              {isLoadingPhonemeFeedback && (
+                <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <p className="text-sm text-blue-700">🔄 Analyzing phoneme-level pronunciation differences...</p>
+                </div>
+              )}
 
               {/* Action Buttons */}
               <div className="flex gap-4 mt-6">

@@ -12,6 +12,7 @@ export const API_ENDPOINTS = {
   
   // Accent Detection
   DETECT_ACCENT: `${API_BASE_URL}/api/detect_accent`,
+  PHONEME_FEEDBACK: `${API_BASE_URL}/api/phoneme-feedback/analyze`,
   
   // Chat
   CHAT_MESSAGE: `${API_BASE_URL}/api/chat/message`,
