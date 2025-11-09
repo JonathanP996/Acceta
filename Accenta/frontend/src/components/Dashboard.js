@@ -517,9 +517,22 @@ const Dashboard = () => {
               </h1>
               <p className="text-sm text-gray-600 mb-2">{user?.email}</p>
               {(() => {
-                // Hardcoded to always show Intermediate
-                const skillLevelName = 'Intermediate';
-                
+                const profileSkillLevel = currentProfile?.skillLevel || selectedSkillLevel;
+                let skillLevelName = 'Unassigned';
+
+                if (profileSkillLevel) {
+                  if (typeof profileSkillLevel === 'string') {
+                    skillLevelName = profileSkillLevel;
+                  } else if (typeof profileSkillLevel === 'object' && profileSkillLevel.name) {
+                    skillLevelName = profileSkillLevel.name;
+                  }
+                } else if (currentProfile?.overallScore != null) {
+                  const calculatedLevel = getSkillLevel(currentProfile.overallScore);
+                  if (calculatedLevel?.name) {
+                    skillLevelName = calculatedLevel.name;
+                  }
+                }
+
                 return (
                   <div className="flex items-center gap-2 mt-1">
                     <span className="text-xs font-semibold text-gray-700">Skill Level:</span>

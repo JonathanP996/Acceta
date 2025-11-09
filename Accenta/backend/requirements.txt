@@ -28,12 +28,13 @@ numpy==1.26.4
 # Speech recognition
 openai==1.51.0
 
-# Phoneme alignment
-montreal-forced-aligner==3.0.0
 
 # Machine Learning
 torch>=2.0.0
 torchaudio>=2.0.0
+tensorflow>=2.13.0
+scipy>=1.11.0
+scikit-learn>=1.3.0
 
 # Google Cloud / ADK
 google-cloud-aiplatform==1.71.1

@@ -1,0 +1,98 @@
+{
+  "summary": {
+    "total_tests": 4,
+    "successful": 4,
+    "correct": 1,
+    "accuracy": 25.0
+  },
+  "results": [
+    {
+      "file": "JonathanIndian.mp3",
+      "expected": "indian",
+      "predicted": "arabic",
+      "confidence": 49.51,
+      "correct": false,
+      "is_uncertain": true,
+      "top_3": [
+        {
+          "accent": "arabic",
+          "confidence": 49.50786209106445
+        },
+        {
+          "accent": "french",
+          "confidence": 45.865909576416016
+        },
+        {
+          "accent": "english",
+          "confidence": 4.0105977058410645
+        }
+      ]
+    },
+    {
+      "file": "JonathanEnglish.mp3",
+      "expected": "english",
+      "predicted": "arabic",
+      "confidence": 99.87,
+      "correct": false,
+      "is_uncertain": false,
+      "top_3": [
+        {
+          "accent": "arabic",
+          "confidence": 99.87262725830078
+        },
+        {
+          "accent": "english",
+          "confidence": 0.08050881326198578
+        },
+        {
+          "accent": "spanish",
+          "confidence": 0.03279225528240204
+        }
+      ]
+    },
+    {
+      "file": "BenjiEnglish.mp3",
+      "expected": "english",
+      "predicted": "english",
+      "confidence": 72.06,
+      "correct": true,
+      "is_uncertain": false,
+      "top_3": [
+        {
+          "accent": "english",
+          "confidence": 72.06071472167969
+        },
+        {
+          "accent": "korean",
+          "confidence": 16.008102416992188
+        },
+        {
+          "accent": "arabic",
+          "confidence": 9.204992294311523
+        }
+      ]
+    },
+    {
+      "file": "BenjiBritish.mp3",
+      "expected": "british",
+      "predicted": "english",
+      "confidence": 42.54,
+      "correct": false,
+      "is_uncertain": true,
+      "top_3": [
+        {
+          "accent": "english",
+          "confidence": 42.54098892211914
+        },
+        {
+          "accent": "spanish",
+          "confidence": 24.476572036743164
+        },
+        {
+          "accent": "arabic",
+          "confidence": 18.732276916503906
+        }
+      ]
+    }
+  ]
+}

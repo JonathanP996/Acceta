@@ -27,16 +27,16 @@ class AudioCapture {
       console.log('Requesting microphone access...');
       
       // Request microphone access with fallback for browsers that don't support all constraints
+      // CRITICAL: Match working HTML - use 44100 Hz sample rate (not 16kHz!)
       let stream;
       try {
-        // Try with full constraints first
+        // Try with full constraints first - match working HTML exactly
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
+            sampleRate: 44100,
             channelCount: 1,
-            sampleRate: 16000,
             echoCancellation: true,
             noiseSuppression: true,
-            autoGainControl: true,
           },
         });
       } catch (constraintError) {
@@ -67,23 +67,27 @@ class AudioCapture {
       this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
 
       // Create MediaRecorder with fallback options
+      // CRITICAL: Match working HTML - don't constrain bitrate, let browser use default
+      // Determine the best MIME type supported by the browser (match working HTML)
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+      } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+        mimeType = 'audio/ogg;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      }
+      
       let options = {
-        mimeType: 'audio/webm;codecs=opus',
-        audioBitsPerSecond: 16000,
+        mimeType: mimeType,
       };
       
       // Check if the mimeType is supported
       if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        console.warn('WebM Opus not supported, trying fallback formats...');
-        // Try other formats
-        if (MediaRecorder.isTypeSupported('audio/webm')) {
-          options.mimeType = 'audio/webm';
-        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          options.mimeType = 'audio/mp4';
-        } else {
-          // Use default
-          options = {};
-        }
+        console.warn('Selected mimeType not supported, using default');
+        options = {}; // Use browser default
       }
 
       this.mediaRecorder = new MediaRecorder(this.stream, options);
@@ -125,7 +129,8 @@ class AudioCapture {
     this.volumeCallback = volumeCallback;
     
     try {
-      this.mediaRecorder.start();
+      // CRITICAL: Match working HTML - start with timeslice to ensure data is available
+      this.mediaRecorder.start(100); // Collect data every 100ms
       console.log('Recording started successfully');
     } catch (error) {
       this.isRecording = false;
@@ -180,7 +185,9 @@ class AudioCapture {
       this.mediaRecorder.onstop = async () => {
         this.isRecording = false;
         try {
-          const audioBlob = new Blob(this.chunks, { type: 'audio/webm' });
+          // CRITICAL: Match working HTML - use the actual mimeType from MediaRecorder
+          const mimeType = this.mediaRecorder.mimeType || 'audio/webm';
+          const audioBlob = new Blob(this.chunks, { type: mimeType });
           const wavBlob = await this.convertToWAV(audioBlob);
           resolve(wavBlob);
         } catch (error) {
@@ -197,14 +204,39 @@ class AudioCapture {
     const arrayBuffer = await audioBlob.arrayBuffer();
     const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
 
-    // Convert to 16-bit PCM WAV
-    const wav = this.audioBufferToWav(audioBuffer);
+    // CRITICAL FIX: Resample to 44.1kHz to match backend expectation
+    // AudioContext may use 48kHz or other rates, but backend expects 44.1kHz
+    const targetSampleRate = 44100;
+    let resampledBuffer = audioBuffer;
+    
+    if (audioBuffer.sampleRate !== targetSampleRate) {
+      console.log(`Resampling from ${audioBuffer.sampleRate}Hz to ${targetSampleRate}Hz`);
+      // Create offline context for resampling
+      const offlineContext = new OfflineAudioContext(
+        1, // channels
+        Math.floor(audioBuffer.length * targetSampleRate / audioBuffer.sampleRate), // length
+        targetSampleRate // sample rate
+      );
+      
+      // Create buffer source
+      const source = offlineContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(offlineContext.destination);
+      source.start(0);
+      
+      // Render to get resampled audio
+      resampledBuffer = await offlineContext.startRendering();
+    }
+
+    // Convert to 16-bit PCM WAV at target sample rate
+    const wav = this.audioBufferToWav(resampledBuffer, targetSampleRate);
     return new Blob([wav], { type: 'audio/wav' });
   }
 
-  audioBufferToWav(buffer) {
+  audioBufferToWav(buffer, targetSampleRate = null) {
     const length = buffer.length;
-    const sampleRate = buffer.sampleRate;
+    // Use targetSampleRate if provided, otherwise use buffer's sample rate
+    const sampleRate = targetSampleRate || buffer.sampleRate;
     const arrayBuffer = new ArrayBuffer(44 + length * 2);
     const view = new DataView(arrayBuffer);
 
@@ -230,10 +262,14 @@ class AudioCapture {
     view.setUint32(40, length * 2, true);
 
     // Convert float samples to 16-bit PCM
+    // CRITICAL: Match working HTML exactly - use ASYMMETRIC quantization
+    // Their working code: sample < 0 ? sample * 0x8000 : sample * 0x7FFF
     let offset = 44;
     for (let i = 0; i < length; i++) {
       const sample = Math.max(-1, Math.min(1, buffer.getChannelData(0)[i]));
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+      // Match working HTML: asymmetric quantization
+      const quantized = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+      view.setInt16(offset, quantized, true);
       offset += 2;
     }
 

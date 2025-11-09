@@ -6,7 +6,6 @@ AI conversation endpoint for live chat mode
 import logging
 import json
 import re
-import time
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -16,7 +15,6 @@ import base64
 
 from services.tts import text_to_speech
 from services.transcribe import transcribe_audio
-from services.accent_classifier import classify_accent
 
 logger = logging.getLogger(__name__)
 
@@ -271,138 +269,24 @@ class ChatRequest(BaseModel):
     language: str
     target_accent: str
     user_message: str
-    pronunciation_score: Optional[float] = None
-    struggle_areas: Optional[List[str]] = None
     conversation_history: Optional[List[ChatMessage]] = None
 
 
 class ChatResponse(BaseModel):
     ai_message: str
-    pronunciation_feedback: Optional[str] = None
     audio_url: Optional[str] = None
-
-
-def generate_pronunciation_feedback_with_gemini(
-        transcribed_text: str,
-        target_accent: str,
-        conversation_history: List[Dict[str, str]],
-        detected_user_accent: Optional[str] = None
-    ) -> Dict[str, Any]:
-    """
-    Use Gemini to analyze pronunciation and generate feedback
-    Returns dict with pronunciation_score, feedback, and struggle_areas
-    """
-    if not GEMINI_AVAILABLE:
-        # Fallback: simple heuristic
-        return {
-            "pronunciation_score": 75.0,
-            "feedback": "Keep practicing!",
-            "struggle_areas": []
-        }
-    
-    try:
-        # Build prompt for Gemini to analyze pronunciation
-        accent_context = ""
-        if detected_user_accent:
-            accent_context = f"\nNote: The student's current accent appears to be {detected_user_accent}. "
-            accent_context += f"Compare their pronunciation to {target_accent} and provide feedback on the differences."
-        
-        # HARDCODED: Wally always speaks Chinese
-        prompt = f"""你是Wally，一个随和的朋友，正在帮助某人练习他们的{target_accent}口音。你要友好、支持，并给出建设性的反馈。
-
-他们说："{transcribed_text}"
-{accent_context}
-
-分析他们的发音并提供：
-1. 发音分数（0-100），基于他们与{target_accent}口音的匹配程度
-2. 友好、鼓励的反馈（1-2句话）- 指出他们的进步，给出建设性的建议
-3. 他们遇到困难的具体音素或方面（列出1-3项）
-
-用以下确切的JSON格式回复：
-{{
-    "pronunciation_score": <数字>,
-    "feedback": "<友好、鼓励的反馈>",
-    "struggle_areas": ["<方面1>", "<方面2>"]
-}}
-
-要友好、支持，并给出建设性的建议。鼓励他们继续练习。"""
-    
-        model = genai.GenerativeModel(GEMINI_MODEL_NAME)
-        response = model.generate_content(prompt)
-        
-        if response and response.text:
-            # Try to parse JSON from response
-            import json
-            
-            # Extract JSON from response (handle markdown code blocks)
-            text = response.text.strip()
-            # Try to find JSON object (handles nested braces)
-            json_match = None
-            start_idx = text.find('{')
-            if start_idx != -1:
-                brace_count = 0
-                for i in range(start_idx, len(text)):
-                    if text[i] == '{':
-                        brace_count += 1
-                    elif text[i] == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            json_match = text[start_idx:i+1]
-                            break
-            
-            if json_match:
-                json_str = json_match
-                try:
-                    result = json.loads(json_str)
-                    return {
-                        "pronunciation_score": float(result.get("pronunciation_score", 75.0)),
-                        "feedback": result.get("feedback", "Keep practicing!"),
-                        "struggle_areas": result.get("struggle_areas", [])
-                    }
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to parse Gemini JSON response: {json_str}")
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Failed to parse pronunciation analysis from Gemini. Response format was invalid."
-                    )
-        
-        # If no JSON found in response, raise error
-        logger.error("Gemini pronunciation analysis response did not contain valid JSON")
-        raise HTTPException(
-            status_code=500,
-            detail="Gemini pronunciation analysis response was not in expected JSON format."
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Gemini pronunciation analysis failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to analyze pronunciation with Gemini: {str(e)}"
-        )
 
 
 def generate_conversational_response(
     user_message: str,
     conversation_history: List[Dict[str, str]],
-    target_accent: str,
-    pronunciation_score: Optional[float] = None,
-    struggle_areas: Optional[List[str]] = None
+    target_accent: str
 ) -> str:
     """
     Generate a friendly, conversational AI response
     """
-    target_accent_lower = target_accent.lower()
-    is_beijing_mandarin = "beijing" in target_accent_lower and "mandarin" in target_accent_lower
-    
     # Handle initial greeting - MUST use Gemini, no fallback
     if not user_message or user_message.strip() == "":
-        # Hardcoded greeting for Beijing Mandarin
-        
-        if is_beijing_mandarin:
-            return "你好 (Nǐ hǎo)! I'm Wally — your AI accent coach. Would you like me to help you learn the Beijing Mandarin accent? It's famous for its clear tones and the \"儿化音\" — that charming -er sound at the end of words."
-        
         if not GEMINI_AVAILABLE:
             raise HTTPException(
                 status_code=503,
@@ -410,9 +294,7 @@ def generate_conversational_response(
             )
         
         try:
-            # HARDCODED: Wally always speaks Chinese
-            greeting_prompt = f"""你是Wally，一个喜欢聊天的随和朋友。你正在帮助某人练习他们的{target_accent}口音，但你想先进行正常的对话。用中文生成一个简短、自然的问候（1-2句话）- 要友好和放松，就像和朋友聊天一样。问他们在做什么或对什么感兴趣。不要提到口音或辅导 - 只是一个友好的人开始对话。"""
-            
+            greeting_prompt = f"""You are Wally, a casual friend who loves chatting. You're helping someone practice their {target_accent} accent, but you want to have a normal conversation first. Generate a brief, natural greeting (1-2 sentences) - be friendly and relaxed, like you're catching up with a friend. Ask them what they're up to or what they're interested in. Don't mention accents or coaching - just be a friendly person starting a conversation."""
             model = genai.GenerativeModel(GEMINI_MODEL_NAME)
             response = model.generate_content(greeting_prompt)
             if response and response.text:
@@ -437,30 +319,13 @@ def generate_conversational_response(
         logger.warning(f"User message too long ({len(user_message)} chars), truncating to {max_user_message_length}")
         user_message = user_message[:max_user_message_length] + "..."
     
-    # HARDCODED: Wally always speaks Chinese
     # Create system prompt for friendly conversation - act like a casual friend
     # Use simpler format similar to diagnostic (which works)
-    system_prompt = f"""你是Wally，一个正在正常聊天的随和朋友。你正在和正在练习{target_accent}口音的人聊天，但你的主要目标是进行自然、友好的对话 - 就像和朋友在一起一样。
+    system_prompt = f"""You are Wally, a casual friend having a normal conversation. You're chatting with someone who's practicing their {target_accent} accent, but your main goal is to have a natural, friendly conversation - like you're hanging out with a friend.
 
-他们说："{user_message}"
+They said: "{user_message}"
 
-用中文自然地回复1-2句话。进行正常的对话 - 承认他们说的话，分享你的想法，提出后续问题。对他们说的话真正感兴趣。只有在有明显问题时才自然地给出发音建议，并随意地融入（比如"顺便说一下，那个词说得很好！"或"嘿，试试把那个音发得更清楚一点"）。但主要是像朋友一样聊天。
-    
-如果他们的发音有问题，特别是北京口音的特点（比如儿化音、卷舌音），可以友好地给出建议。"""
-    
-    if is_beijing_mandarin:
-        system_prompt += """
-同时，请确保每次回复都给出与北京口音相关的建议。可以提醒对方注意儿化音（-r结尾）、卷舌音（zh/ch/sh/r）、声调起伏或地道的北京表达。必要时提供拼音（例如 chī le'r）帮助他们模仿，让对话既自然又具备指导性。"""
-    
-    # Add pronunciation feedback if available (keep concise) - HARDCODED: Always in Chinese
-    if pronunciation_score is not None:
-        if pronunciation_score >= 80:
-            system_prompt += f"\n(注意：发音很好 - {pronunciation_score:.1f}%)"
-        elif pronunciation_score < 60:
-            system_prompt += f"\n(注意：发音需要改进 - {pronunciation_score:.1f}%)"
-    
-    if struggle_areas:
-        system_prompt += f"\n(需要改进的地方：{', '.join(struggle_areas[:2])})"  # Limit to 2 areas
+Respond naturally in 1-2 sentences. Have a normal conversation - acknowledge what they said, share your thoughts, ask follow-up questions. Be genuinely interested in what they're saying. Chat like a friend would."""
     
     # CRITICAL: Must use Gemini - no fallback allowed
     if not GEMINI_AVAILABLE:
@@ -499,19 +364,9 @@ def generate_conversational_response(
         # Build the full prompt with user's current message (keep it minimal)
         current_user_message = user_message  # Don't add "Student:" prefix to save tokens
         
-        # Add pronunciation context if available (very brief)
-        pronunciation_note = ""
-        if pronunciation_score is not None:
-            if pronunciation_score >= 80:
-                pronunciation_note = f" (pronunciation: {pronunciation_score:.0f}%)"
-            elif pronunciation_score < 60:
-                pronunciation_note = f" (pronunciation: {pronunciation_score:.0f}% - needs work)"
-        
         # Build complete prompt - use simple format like diagnostic (which works)
         # Don't include history to avoid issues - the system_prompt already has the user message
         full_prompt = system_prompt
-        if pronunciation_note:
-            full_prompt += pronunciation_note
         
         # Use standard generate_content (more reliable than start_chat)
         # Configure safety settings to be more permissive for educational content
@@ -647,12 +502,11 @@ def generate_conversational_response(
                     # Use the original user_message (already truncated to 200 chars) but limit to 100 for retry
                     retry_user_msg = user_message[:100] if len(user_message) > 100 else user_message
                     # Use the same simple format as diagnostic (which works)
-                    # HARDCODED: Wally always speaks Chinese
-                    simple_prompt = f"""你是Wally，一个正在正常聊天的随和朋友。你正在和正在练习{target_accent}口音的人聊天，但你的主要目标是进行自然、友好的对话。
+                    simple_prompt = f"""You are Wally, a casual friend having a normal conversation. You're chatting with someone practicing their {target_accent} accent, but focus on having a natural conversation.
 
-他们说："{retry_user_msg}"
+They said: "{retry_user_msg}"
 
-用中文自然地回复1-2句话。进行正常的对话 - 承认他们说的话，分享你的想法，提出后续问题。要友好和自然，就像和朋友聊天一样。"""
+Respond naturally in 1-2 sentences. Have a normal conversation - acknowledge what they said and ask a follow-up question. Be friendly and conversational, like you're talking to a friend."""
                     
                     logger.info(f"Attempting retry with minimal prompt (no history, user message: {len(retry_user_msg)} chars)")
                     logger.debug(f"Retry prompt: {simple_prompt}")
@@ -826,46 +680,6 @@ def generate_conversational_response(
     )
 
 
-def generate_fallback_response(user_message: str, pronunciation_score: Optional[float] = None) -> str:
-    """Generate a friendly fallback response in Chinese based on what the user said"""
-    if not user_message or user_message.strip() == "":
-        return "你好！我是Wally。最近怎么样？有什么想聊的吗？"
-    
-    # Extract key information from user message to make response more relevant
-    user_lower = user_message.lower()
-    user_words = user_message.split()
-    
-    # Try to reference something specific from their message
-    if len(user_words) > 0:
-        # Use first few words or key topic
-        key_phrase = " ".join(user_words[:4]) if len(user_words) >= 4 else user_message[:30]
-        responses = [
-            f"哦，关于{key_phrase}啊！{get_pronunciation_comment(pronunciation_score)} 能多跟我说说吗？",
-            f"有意思！{get_pronunciation_comment(pronunciation_score)} 关于{key_phrase}，你最喜欢什么？",
-            f"听起来不错！{get_pronunciation_comment(pronunciation_score)} {key_phrase}怎么样？",
-            f"挺好的！{get_pronunciation_comment(pronunciation_score)} 你是怎么开始对{key_phrase}感兴趣的？",
-        ]
-    else:
-        responses = [
-            f"哦，这样啊！{get_pronunciation_comment(pronunciation_score)} 能多跟我说说吗？",
-            f"不错！{get_pronunciation_comment(pronunciation_score)} 那是什么感觉？",
-            f"听起来很有趣！{get_pronunciation_comment(pronunciation_score)} 你是怎么想的？",
-        ]
-    
-    import random
-    return random.choice(responses)
-
-
-def get_pronunciation_comment(score: Optional[float]) -> str:
-    """Get a pronunciation comment based on score - friendly and encouraging style in Chinese"""
-    if score is None:
-        return ""
-    if score >= 80:
-        return "顺便说一下，你刚才说得很好！"
-    elif score >= 60:
-        return "你做得不错，继续加油！"
-    else:
-        return "继续努力，你正在进步！"
 
 
 @router.post("/message", response_model=ChatResponse)
@@ -881,9 +695,7 @@ async def chat_message(request: ChatRequest):
     """
     try:
         logger.info(f"Generating chat response for session {request.session_id}")
-        target_accent_lower = (request.target_accent or "").lower()
-        is_beijing_mandarin = "beijing" in target_accent_lower and "mandarin" in target_accent_lower
-         
+        
         # Convert conversation history to dict format
         history = []
         if request.conversation_history:
@@ -897,28 +709,12 @@ async def chat_message(request: ChatRequest):
         ai_message = generate_conversational_response(
             user_message=request.user_message,
             conversation_history=history,
-            target_accent=request.target_accent,
-            pronunciation_score=request.pronunciation_score,
-            struggle_areas=request.struggle_areas
+            target_accent=request.target_accent
         )
         
-        # Generate pronunciation feedback if score is low - HARDCODED: Always in Chinese
-        pronunciation_feedback = None
-        if request.pronunciation_score is not None and request.pronunciation_score < 70:
-            if request.struggle_areas:
-                if is_beijing_mandarin:
-                    pronunciation_feedback = f"不错，咱们再在‘{request.struggle_areas[0]}’这个部分多下点功夫。试着把卷舌音和儿化音带出来，比如把结尾拖成轻轻的 -r。你已经很接近北京味儿了！"
-                else:
-                    pronunciation_feedback = f"嘿，试试改进一下'{request.struggle_areas[0]}'这个音 - 你已经做得很好了！"
-            else:
-                if is_beijing_mandarin:
-                    pronunciation_feedback = "继续努力！可以多练练儿化音，比如把‘吃了’说成 chī le'r，让语气更有北京味儿。"
-                else:
-                    pronunciation_feedback = "继续努力 - 你正在进步！"
-        
-        # Generate TTS audio - HARDCODED: Always use Chinese voice for Wally
+        # Generate TTS audio
         try:
-            accent_name = "beijing"  # Always use Beijing/Chinese voice
+            accent_name = request.target_accent.lower().replace(' english', '').replace('english', '').strip()
             audio_bytes = await text_to_speech(
                 text=ai_message,
                 accent=accent_name
@@ -934,7 +730,6 @@ async def chat_message(request: ChatRequest):
         
         return ChatResponse(
             ai_message=ai_message,
-            pronunciation_feedback=pronunciation_feedback,
             audio_url=None  # In production, return CDN URL
         )
         
@@ -959,8 +754,7 @@ async def chat_message_with_audio(request: ChatRequest):
         
         # Generate TTS audio - always try to generate, even if it fails
         audio_base64 = None
-        # HARDCODED: Always use Chinese voice for Wally
-        accent_name = "beijing"  # Always use Beijing/Chinese voice
+        accent_name = request.target_accent.lower().replace(' english', '').replace('english', '').strip()
         
         try:
             # Use robotic voice for Wally
@@ -984,7 +778,6 @@ async def chat_message_with_audio(request: ChatRequest):
         
         return {
             "ai_message": chat_response.ai_message,
-            "pronunciation_feedback": chat_response.pronunciation_feedback,
             "audio_base64": audio_base64,  # May be None if TTS failed
         }
         
@@ -995,8 +788,6 @@ async def chat_message_with_audio(request: ChatRequest):
         logger.error(f"   Error type: {type(e).__name__}")
         logger.error("=" * 80)
         logger.error(f"Full exception traceback:", exc_info=True)
-        # Return response even if there's an error, so frontend can handle it
-        # But also raise HTTPException so frontend knows there was an error
         raise HTTPException(
             status_code=500,
             detail=f"Failed to generate chat response: {str(e)}"
@@ -1013,11 +804,11 @@ async def chat_message_with_audio_upload(
     audio_file: UploadFile = File(...)
 ):
     """
-    Process audio directly: Whisper transcription -> Gemini feedback & response -> TTS
+    Process audio directly: Whisper transcription -> Gemini conversational response -> TTS
     
     This is the main endpoint for live chat that:
     1. Transcribes audio with Whisper
-    2. Uses Gemini to analyze pronunciation and generate conversational response
+    2. Uses Gemini to generate conversational response
     3. Generates TTS audio for the response
     """
     import time
@@ -1071,7 +862,7 @@ async def chat_message_with_audio_upload(
             # Check if transcription is empty or unclear
             if not transcribed_text or len(transcribed_text.strip()) < 1:
                 # Return a friendly response asking user to be more clear
-                unclear_response = remove_asterisks("What? I can't understand your terrible pronunciation. Speak clearly or don't bother.")
+                unclear_response = remove_asterisks("Sorry, I didn't catch that. Could you say that again?")
                 logger.warning("Transcription was empty - asking user to be more clear")
                 
                 # Generate TTS for the unclear response
@@ -1091,18 +882,13 @@ async def chat_message_with_audio_upload(
                 return {
                     "transcribed_text": "",
                     "ai_message": unclear_response,
-                    "pronunciation_score": None,
-                    "pronunciation_feedback": "Could you speak a bit more clearly?",
-                    "struggle_areas": [],
-                    "audio_base64": audio_base64,
-                    "detected_user_accent": None,
-                    "accent_confidence": None
+                    "audio_base64": audio_base64
                 }
             
             # Check if transcription is too short or unclear (less than 3 characters after cleaning)
             cleaned_text = transcribed_text.strip()
             if len(cleaned_text) < 3:
-                unclear_response = remove_asterisks("Your pronunciation is so bad I can't even understand you. Try again, and this time actually speak clearly.")
+                unclear_response = remove_asterisks("Hmm, I'm having trouble making that out. Could you try saying it again?")
                 logger.warning(f"Transcription too short ({len(cleaned_text)} chars): '{cleaned_text}' - asking user to be more clear")
                 
                 # Generate TTS for the unclear response
@@ -1122,12 +908,7 @@ async def chat_message_with_audio_upload(
                 return {
                     "transcribed_text": cleaned_text,
                     "ai_message": unclear_response,
-                    "pronunciation_score": None,
-                    "pronunciation_feedback": "Could you speak a bit more clearly?",
-                    "struggle_areas": [],
-                    "audio_base64": audio_base64,
-                    "detected_user_accent": None,
-                    "accent_confidence": None
+                    "audio_base64": audio_base64
                 }
             
             # Check if transcription is mostly noise/unintelligible (mostly punctuation or special chars)
@@ -1135,7 +916,7 @@ async def chat_message_with_audio_upload(
             alpha_chars = len(re.sub(r'[^a-zA-Z]', '', cleaned_text))
             total_chars = len(cleaned_text)
             if total_chars > 0 and alpha_chars / total_chars < 0.3:  # Less than 30% alphabetic
-                unclear_response = remove_asterisks("That was unintelligible garbage. Speak properly or get lost.")
+                unclear_response = remove_asterisks("Sorry, I couldn't quite make that out. Mind saying it again?")
                 logger.warning(f"Transcription appears to be mostly noise ({alpha_chars}/{total_chars} alphabetic): '{cleaned_text}' - asking user to be more clear")
                 
                 # Generate TTS for the unclear response
@@ -1155,63 +936,16 @@ async def chat_message_with_audio_upload(
                 return {
                     "transcribed_text": cleaned_text,
                     "ai_message": unclear_response,
-                    "pronunciation_score": None,
-                    "pronunciation_feedback": "Could you speak a bit more clearly?",
-                    "struggle_areas": [],
-                    "audio_base64": audio_base64,
-                    "detected_user_accent": None,
-                    "accent_confidence": None
+                    "audio_base64": audio_base64
                 }
             
             logger.info(f"   Whisper transcribed text: '{transcribed_text}' (detected language: {detected_language})")
             
-            # Step 2.5: Detect user's accent from audio (non-blocking, fast timeout)
-            # Skip accent detection if it's causing delays - can be re-enabled later
-            step_start = time.time()
+            # Accent detection removed - will be re-implemented with new model
             detected_user_accent = None
             accent_confidence = None
-            
-            # Temporarily disable accent detection to prevent hanging
-            # Set ENABLE_ACCENT_DETECTION=true in .env to re-enable
-            enable_accent_detection = os.getenv("ENABLE_ACCENT_DETECTION", "false").lower() == "true"
-            
-            if enable_accent_detection:
-                logger.info("🔄 STEP 2.5: Starting accent detection...")
-                try:
-                    import asyncio
-                    # Use a very short timeout to avoid blocking the request
-                    accent_classification = await asyncio.wait_for(
-                        classify_accent(
-                            tmp_file_path,
-                            use_classifier=False,  # Use fast heuristic to avoid timeout in live chat
-                            timeout=2.0  # Very short timeout - 2 seconds max
-                        ),
-                        timeout=2.0  # Maximum 2 seconds total
-                    )
-                    detected_user_accent = accent_classification.get("predicted_accent", None)
-                    accent_confidence = accent_classification.get("confidence", None)
-                    accent_method = accent_classification.get("method", "unknown")
-                    step_times['accent_detection'] = time.time() - step_start
-                    logger.info(f"✅ STEP 2.5: Accent detection completed ({step_times['accent_detection']:.2f}s)")
-                    logger.info(f"   Detected: {detected_user_accent} (confidence: {accent_confidence:.2f if accent_confidence else 'N/A'}, method: {accent_method})")
-                    
-                    # Note: User is speaking with {detected_user_accent} accent, learning {target_accent}
-                    if detected_user_accent:
-                        logger.info(f"   User accent noted: {detected_user_accent} (target: {target_accent})")
-                        
-                except asyncio.TimeoutError:
-                    step_times['accent_detection'] = time.time() - step_start
-                    logger.warning(f"⚠️ STEP 2.5: Accent detection timed out after 2s ({step_times['accent_detection']:.2f}s) - continuing without accent detection")
-                    detected_user_accent = None
-                    accent_confidence = None
-                except Exception as e:
-                    step_times['accent_detection'] = time.time() - step_start
-                    logger.warning(f"⚠️ STEP 2.5: Accent detection failed ({step_times['accent_detection']:.2f}s): {e} - continuing without accent detection")
-                    detected_user_accent = None
-                    accent_confidence = None
-            else:
-                step_times['accent_detection'] = 0
-                logger.debug("⏭️ STEP 2.5: Accent detection disabled (set ENABLE_ACCENT_DETECTION=true to enable)")
+            step_times['accent_detection'] = 0
+        
         finally:
             # Clean up temporary file immediately after accent detection
             try:
@@ -1250,149 +984,9 @@ async def chat_message_with_audio_upload(
             except Exception as e:
                 logger.warning(f"Failed to parse conversation history: {e}")
         
-        # Hardcoded conversation for Beijing Mandarin
-        target_accent_lower = target_accent.lower()
-        is_beijing_mandarin = "beijing" in target_accent_lower and "mandarin" in target_accent_lower
-        
-        if is_beijing_mandarin:
-            # Count assistant messages in history to determine which step we're on
-            # Step 0: 0 assistant messages (intro)
-            # Step 1: 1 assistant message (second response)
-            # Step 2: 2 assistant messages (third response)
-            assistant_message_count = sum(1 for msg in history if msg.get("role") == "assistant")
-            
-            # Step 0: Intro statement (no assistant messages yet - this is the first response)
-            if assistant_message_count == 0:
-                import asyncio
-                await asyncio.sleep(3)  # 3 second delay
-                
-                hardcoded_response = "你好 (Nǐ hǎo)! I'm Wally — your AI accent coach. Would you like me to help you learn the Beijing Mandarin accent? It's famous for its clear tones and the \"儿化音\" — that charming -er sound at the end of words."
-                
-                # Generate TTS for the response
-                audio_base64 = None
-                accent_name = target_accent.lower().replace(' english', '').replace('english', '').strip()
-                try:
-                    audio_bytes = await text_to_speech(
-                        text=hardcoded_response,
-                        accent=accent_name,
-                        robotic=True
-                    )
-                    if audio_bytes and len(audio_bytes) > 0:
-                        audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
-                except Exception as tts_error:
-                    logger.warning(f"TTS generation failed for hardcoded response: {tts_error}")
-                
-                return {
-                    "transcribed_text": transcribed_text,
-                    "ai_message": hardcoded_response,
-                    "pronunciation_score": None,
-                    "pronunciation_feedback": None,
-                    "struggle_areas": [],
-                    "audio_base64": audio_base64,
-                    "detected_user_accent": None,
-                    "accent_confidence": None
-                }
-            
-            # Step 1: Second response (1 assistant message - intro already sent)
-            elif assistant_message_count == 1:
-                import asyncio
-                await asyncio.sleep(3)  # 3 second delay
-                
-                hardcoded_response = "太好了！(Tài hǎo le!) Awesome! Let's start simple.\n\nIn Beijing Mandarin, people might say:\n\n\"你吃饭了吗儿？\" (Nǐ chī fàn le ma'r? – \"Have you eaten?\")\n\nTry answering me in Mandarin — you can say whether you've eaten or not!"
-                
-                # Generate TTS for the response
-                audio_base64 = None
-                accent_name = target_accent.lower().replace(' english', '').replace('english', '').strip()
-                try:
-                    audio_bytes = await text_to_speech(
-                        text=hardcoded_response,
-                        accent=accent_name,
-                        robotic=True
-                    )
-                    if audio_bytes and len(audio_bytes) > 0:
-                        audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
-                except Exception as tts_error:
-                    logger.warning(f"TTS generation failed for hardcoded response: {tts_error}")
-                
-                return {
-                    "transcribed_text": transcribed_text,
-                    "ai_message": hardcoded_response,
-                    "pronunciation_score": None,
-                    "pronunciation_feedback": None,
-                    "struggle_areas": [],
-                    "audio_base64": audio_base64,
-                    "detected_user_accent": None,
-                    "accent_confidence": None
-                }
-            
-            # Step 2: Third response (2 assistant messages - intro and second response already sent)
-            elif assistant_message_count == 2:
-                import asyncio
-                await asyncio.sleep(3)  # 3 second delay
-                
-                hardcoded_response = "很好！(Hěn hǎo!) That's a great start! Your tone pattern is clear.\n\nBut in the Beijing accent, people often add that 儿 sound playfully. You could say:\n\n\"我吃了儿～\" (Wǒ chī le'r~)\n\nNotice how the -r rolls slightly at the end? That's the signature Beijing flavor!\n\nLet's try that together — slowly: chī le'r… chī le'r…"
-                
-                # Generate TTS for the response
-                audio_base64 = None
-                accent_name = target_accent.lower().replace(' english', '').replace('english', '').strip()
-                try:
-                    audio_bytes = await text_to_speech(
-                        text=hardcoded_response,
-                        accent=accent_name,
-                        robotic=True
-                    )
-                    if audio_bytes and len(audio_bytes) > 0:
-                        audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
-                except Exception as tts_error:
-                    logger.warning(f"TTS generation failed for hardcoded response: {tts_error}")
-                
-                return {
-                    "transcribed_text": transcribed_text,
-                    "ai_message": hardcoded_response,
-                    "pronunciation_score": None,
-                    "pronunciation_feedback": None,
-                    "struggle_areas": [],
-                    "audio_base64": audio_base64,
-                    "detected_user_accent": None,
-                    "accent_confidence": None
-                }
-        
-        # Step 3: Use Gemini to analyze pronunciation and generate feedback
-        # Include detected user accent in the analysis for better feedback
+        # Step 3: Generate conversational response with Gemini
         step_start = time.time()
-        logger.info("🔄 STEP 3: Starting pronunciation analysis with Gemini...")
-        pronunciation_analysis = generate_pronunciation_feedback_with_gemini(
-            transcribed_text=transcribed_text,
-            target_accent=target_accent,
-            conversation_history=history,
-            detected_user_accent=detected_user_accent  # Pass detected accent for better analysis
-        )
-        step_times['pronunciation_analysis'] = time.time() - step_start
-        logger.info(f"✅ STEP 3: Pronunciation analysis completed ({step_times['pronunciation_analysis']:.2f}s)")
-        
-        # Check if pronunciation_analysis is None or not a dict
-        if pronunciation_analysis is None:
-            logger.error("❌ STEP 3: Pronunciation analysis returned None")
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to analyze pronunciation. Please try again."
-            )
-        
-        if not isinstance(pronunciation_analysis, dict):
-            logger.error(f"❌ STEP 3: Pronunciation analysis is not a dict: {type(pronunciation_analysis)}")
-            raise HTTPException(
-                status_code=500,
-                detail="Pronunciation analysis returned invalid format. Please try again."
-            )
-        
-        pronunciation_score = pronunciation_analysis.get("pronunciation_score", 75.0)
-        pronunciation_feedback = pronunciation_analysis.get("feedback", "")
-        struggle_areas = pronunciation_analysis.get("struggle_areas", [])
-        logger.info(f"   Pronunciation score: {pronunciation_score}, Struggle areas: {struggle_areas}")
-        
-        # Step 4: Generate conversational response with Gemini
-        step_start = time.time()
-        logger.info("🔄 STEP 4: Starting conversational response generation with Gemini...")
+        logger.info("🔄 STEP 3: Starting conversational response generation with Gemini...")
         logger.info(f"   User message (transcribed): '{transcribed_text}'")
         logger.info(f"   Conversation history length: {len(history)} messages")
         if history:
@@ -1400,12 +994,10 @@ async def chat_message_with_audio_upload(
         ai_message_raw = generate_conversational_response(
             user_message=transcribed_text,
             conversation_history=history,
-            target_accent=target_accent,
-            pronunciation_score=pronunciation_score,
-            struggle_areas=struggle_areas
+            target_accent=target_accent
         )
         step_times['conversational_response'] = time.time() - step_start
-        logger.info(f"✅ STEP 4: Conversational response generated ({step_times['conversational_response']:.2f}s)")
+        logger.info(f"✅ STEP 3: Conversational response generated ({step_times['conversational_response']:.2f}s)")
         
         # Remove asterisks from AI message
         ai_message = remove_asterisks(ai_message_raw) if ai_message_raw else None
@@ -1434,12 +1026,12 @@ async def chat_message_with_audio_upload(
         
         logger.info(f"   Generated AI response: '{ai_message[:100]}...' (length: {len(ai_message)})")
         
-        # Step 5: Generate TTS audio for response
+        # Step 4: Generate TTS audio for response
         step_start = time.time()
         audio_base64 = None
         accent_name = target_accent.lower().replace(' english', '').replace('english', '').strip()
         
-        logger.info("🔄 STEP 5: Starting TTS audio generation...")
+        logger.info("🔄 STEP 4: Starting TTS audio generation...")
         try:
             audio_bytes = await text_to_speech(
                 text=ai_message,
@@ -1450,14 +1042,14 @@ async def chat_message_with_audio_upload(
             
             if audio_bytes and len(audio_bytes) > 0:
                 audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
-                logger.info(f"✅ STEP 5: TTS audio generation completed ({step_times['tts_generation']:.2f}s)")
+                logger.info(f"✅ STEP 4: TTS audio generation completed ({step_times['tts_generation']:.2f}s)")
                 logger.info(f"   Generated audio: {len(audio_bytes)} bytes, base64 length: {len(audio_base64)}")
             else:
-                logger.warning(f"⚠️ STEP 5: TTS returned empty audio bytes ({step_times['tts_generation']:.2f}s)")
+                logger.warning(f"⚠️ STEP 4: TTS returned empty audio bytes ({step_times['tts_generation']:.2f}s)")
                 audio_base64 = None
         except Exception as tts_error:
             step_times['tts_generation'] = time.time() - step_start
-            logger.error(f"❌ STEP 5: TTS generation failed ({step_times['tts_generation']:.2f}s): {tts_error}", exc_info=True)
+            logger.error(f"❌ STEP 4: TTS generation failed ({step_times['tts_generation']:.2f}s): {tts_error}", exc_info=True)
             audio_base64 = None
         
         total_time = time.time() - start_time
@@ -1469,7 +1061,6 @@ async def chat_message_with_audio_upload(
         logger.info(f"     - Read audio: {step_times.get('read_audio', 0):.2f}s")
         logger.info(f"     - Whisper transcription: {step_times.get('whisper_transcription', 0):.2f}s")
         logger.info(f"     - Accent detection: {step_times.get('accent_detection', 0):.2f}s")
-        logger.info(f"     - Pronunciation analysis: {step_times.get('pronunciation_analysis', 0):.2f}s")
         logger.info(f"     - Conversational response: {step_times.get('conversational_response', 0):.2f}s")
         logger.info(f"     - TTS generation: {step_times.get('tts_generation', 0):.2f}s")
         logger.info(f"   Response: {len(ai_message)} chars, Audio: {'Yes' if audio_base64 else 'No'}")
@@ -1478,9 +1069,6 @@ async def chat_message_with_audio_upload(
         return {
             "transcribed_text": transcribed_text,
             "ai_message": ai_message,
-            "pronunciation_score": pronunciation_score,
-            "pronunciation_feedback": pronunciation_feedback,
-            "struggle_areas": struggle_areas,
             "audio_base64": audio_base64,
             "detected_user_accent": detected_user_accent,  # Include detected accent in response
             "accent_confidence": accent_confidence

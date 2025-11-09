@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accent Detection - Microphone Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 16px;
+            margin: 10px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+        }
+        .record-btn {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .record-btn:hover {
+            background-color: #45a049;
+        }
+        .stop-btn {
+            background-color: #f44336;
+            color: white;
+        }
+        .stop-btn:hover {
+            background-color: #da190b;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 20px;
+            background-color: #f1f1f1;
+            border-radius: 5px;
+        }
+        .status {
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .recording {
+            color: #f44336;
+        }
+        .success {
+            color: #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎤 Accent Detection - Microphone Test</h1>
+    
+    <div>
+        <button id="recordBtn" class="record-btn" onclick="startRecording()">Start Recording</button>
+        <button id="stopBtn" class="stop-btn" onclick="stopRecording()" disabled>Stop Recording</button>
+    </div>
+    
+    <div id="status" class="status"></div>
+    <div id="result" class="result" style="display: none;"></div>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    await detectAccent(audioBlob);
+                    stream.getTracks().forEach(track => track.stop());
+                };
+
+                mediaRecorder.start();
+                isRecording = true;
+                
+                document.getElementById('recordBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('status').textContent = '🔴 Recording... (speak now)';
+                document.getElementById('status').className = 'status recording';
+            } catch (error) {
+                console.error('Error accessing microphone:', error);
+                document.getElementById('status').textContent = '❌ Error: ' + error.message;
+                document.getElementById('status').className = 'status';
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+                
+                document.getElementById('recordBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                document.getElementById('status').textContent = '⏳ Processing...';
+                document.getElementById('status').className = 'status';
+            }
+        }
+
+        async function detectAccent(audioBlob) {
+            try {
+                const formData = new FormData();
+                formData.append('file', audioBlob, 'recording.webm');
+
+                const response = await fetch('http://localhost:5001/detect-accent', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+
+                // Display results
+                document.getElementById('result').style.display = 'block';
+                document.getElementById('result').innerHTML = `
+                    <h2>🎯 Detection Results</h2>
+                    <p><strong>Accent:</strong> ${result.accent}</p>
+                    <p><strong>Confidence:</strong> ${result.confidence}%</p>
+                    <h3>Top 3 Predictions:</h3>
+                    <ul>
+                        ${result.top_n.map(p => 
+                            `<li>${p.accent}: ${p.confidence.toFixed(2)}%</li>`
+                        ).join('')}
+                    </ul>
+                `;
+                
+                document.getElementById('status').textContent = '✅ Detection complete!';
+                document.getElementById('status').className = 'status success';
+            } catch (error) {
+                console.error('Error detecting accent:', error);
+                document.getElementById('status').textContent = '❌ Error: ' + error.message;
+                document.getElementById('status').className = 'status';
+                document.getElementById('result').style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>
+

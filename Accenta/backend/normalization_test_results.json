@@ -1,0 +1,68 @@
+[
+  {
+    "file": "JonathanEnergetic.mp3",
+    "predicted": "english",
+    "confidence": 99.42,
+    "is_correct": true,
+    "english_in_top3": true,
+    "english_confidence": 99.42161560058594,
+    "top_3": [
+      {
+        "accent": "english",
+        "confidence": 99.42161560058594
+      },
+      {
+        "accent": "mandarin",
+        "confidence": 0.35904768109321594
+      },
+      {
+        "accent": "italian",
+        "confidence": 0.19179730117321014
+      }
+    ]
+  },
+  {
+    "file": "JonathanMonotone.mp3",
+    "predicted": "english",
+    "confidence": 95.81,
+    "is_correct": true,
+    "english_in_top3": true,
+    "english_confidence": 95.81475830078125,
+    "top_3": [
+      {
+        "accent": "english",
+        "confidence": 95.81475830078125
+      },
+      {
+        "accent": "mandarin",
+        "confidence": 2.710632085800171
+      },
+      {
+        "accent": "turkish",
+        "confidence": 0.6557189226150513
+      }
+    ]
+  },
+  {
+    "file": "JonathanMixed.mp3",
+    "predicted": "mandarin",
+    "confidence": 52.95,
+    "is_correct": false,
+    "english_in_top3": true,
+    "english_confidence": 47.0181999206543,
+    "top_3": [
+      {
+        "accent": "mandarin",
+        "confidence": 52.953243255615234
+      },
+      {
+        "accent": "english",
+        "confidence": 47.0181999206543
+      },
+      {
+        "accent": "russian",
+        "confidence": 0.008150882087647915
+      }
+    ]
+  }
+]
